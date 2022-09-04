@@ -6,6 +6,10 @@ from sklearn.utils import resample
 
 
 class GrainSize:
+    """
+    Estimates D50, D16, and D84 as well as the 95% confidence interval for each, for every segment of
+    a drainage network using one or more field measurements of grain size
+    """
 
     def __init__(self, network, measurements, reach_ids):
 
