@@ -69,10 +69,19 @@ class GrainSize:
             for i in self.dn.index:
                 print(f'Estimating D50 for segment : {i}')
                 h_c_50 = self.reach_stats[self.reach_ids[0]]['h_coef_50']*self.dn.loc[i, 'TotDASqKm']**0.4
-                print(f'critical depth: {h_c_50}')
                 tau_c_50 = 1000 * 9.81 * h_c_50 * self.dn.loc[i, 'Slope']
                 d50 = tau_c_50 / ((2650 - 1000) * 9.81 * 0.038)
                 self.dn.loc[i, 'D50_est'] = d50 * 1000
+                h_c_16 = self.reach_stats[self.reach_ids[0]]['h_coef_16']*self.dn.loc[i, 'TotDASqKm']**0.4
+                tau_c_16 = 1000 * 9.81 * h_c_16 * self.dn.loc[i, 'Slope']
+                tau_c_star_16 = 0.038 * (self.reach_stats[self.reach_ids[0]]['d16']/self.reach_stats[self.reach_ids[0]]['d50']) ** -0.65
+                d16 = tau_c_16 / ((2650 - 1000) * 9.81 * tau_c_star_16)
+                self.dn.loc[i, 'D16_est'] = d16 * 1000
+                h_c_84 = self.reach_stats[self.reach_ids[0]]['h_coef_84'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                tau_c_84 = 1000 * 9.81 * h_c_84 * self.dn.loc[i, 'Slope']
+                tau_c_star_84 = 0.038 * (self.reach_stats[self.reach_ids[0]]['d84'] / self.reach_stats[self.reach_ids[0]]['d50']) ** -0.65
+                d84 = tau_c_84 / ((2650 - 1000) * 9.81 * tau_c_star_84)
+                self.dn.loc[i, 'D84_est'] = d84 * 1000
 
         self.dn.to_file(self.streams)
 
