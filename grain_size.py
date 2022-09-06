@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 from sklearn.utils import resample
 from scipy import stats
-from scipy.optimize import minimize
+from scipy.optimize import minimize, fmin
 
 
 class GrainSize:
@@ -215,16 +215,23 @@ class GrainSize:
 
             return err
 
-        def std_err(scale, a, loc, d16, d84):
+        def std_err(scale, a, loc, orig_range):
             if scale > 0:
                 dist = stats.skewnorm(a, loc, scale).rvs(1000)
                 dist = dist[dist > 0.0005]
-                err = abs(np.percentile(dist, 16) - d16)**2 + abs(np.percentile(dist, 84) - d84)**2
+                err = abs(orig_range - (max(dist)-min(dist)))
             else:
                 scale = abs(scale)
                 dist = stats.skewnorm(a, loc, scale).rvs(1000)
                 dist = dist[dist > 0.0005]
-                err = abs(np.percentile(dist, 16) - d16) ** 2 + abs(np.percentile(dist, 84) - d84) ** 2
+                err = abs(orig_range - (max(dist)-min(dist)))
+
+            return err
+
+        def shape_err(a, scale, loc, d16, d84):
+            dist = stats.skewnorm(a, loc, scale).rvs(1000)
+            dist = dist[dist > 0.0005]
+            err = abs(np.percentile(dist, 16) - d16) ** 2 + abs(np.percentile(dist, 84) - d84) ** 2
 
             return err
 
@@ -242,28 +249,32 @@ class GrainSize:
                 print(f'finding distribution for segment {i}')
                 d_50, d_16, d_84 = (self.dn.loc[i, 'D50']/1000), (self.dn.loc[i, 'D16_low']/1000), (self.dn.loc[i, 'D84_high']/1000)
 
-                toler1 = 0.001
-                res = minimize(med_err, loc, args=(a, scale, d_50), method='Nelder-Mead', tol=toler1)
-                loc_opt = res.x[0]
-                while res.success is False:
-                    toler1 += 0.001
-                    res = minimize(med_err, loc, args=(a, scale, d_50), method='Nelder-Mead', tol=toler1)
-                    loc_opt = res.x[0]
+                #toler1 = 0.05
+                res = fmin(med_err, loc, args=(a, scale, d_50))
+                loc_opt = res[0]
+                #while res.success is False:
+                #    toler1 += 0.0005
+                #    res = fmin(med_err, loc, args=(a, scale, d_50))
+                #    loc_opt = res.x[0]
 
-                toler = 0.003
-                res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=toler)
-                scale_opt = res2.x[0]
-                while res2.success is False:
-                    toler += 0.001
-                    print('d16/d84 optimization issue: ', res2.message)
-                    res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=toler)
-                    scale_opt = res2.x[0]
-                while scale_opt <= 0:
-                    toler += 0.001
-                    res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=toler)
-                    scale_opt = res2.x[0]
+                #toler = 0.05
+                range = max(data)-min(data)
+                res2 = fmin(std_err, scale, args=(a, loc_opt, range))
+                scale_opt = res2[0]
+                #while res2.success is False:
+                #    toler += 0.0005
+                #    print('d16/d84 optimization issue: ', res2.message)
+                #    res2 = fmin(std_err, scale, args=(a, loc_opt, d_16, d_84))
+                #    scale_opt = res2.x[0]
+                #while scale_opt <= 0:
+                #    toler += 0.001
+                #    res2 = fmin(std_err, scale, args=(a, loc_opt, d_16, d_84))
+                #    scale_opt = res2.x[0]
 
-                new_data = stats.skewnorm(a, loc_opt, scale_opt).rvs(1000)
+                res3 = fmin(shape_err, a, args=(loc_opt, scale_opt, d_16, d_84))
+                a_opt = res3[0]
+
+                new_data = stats.skewnorm(a_opt, loc_opt, scale_opt).rvs(1000)
                 new_data = new_data[new_data >= 0.0005]
 
                 self.gs[i]['fractions'].update({
@@ -322,7 +333,7 @@ class GrainSize:
                     plt.hist(new_data, bins=15, density=True, alpha=0.6, color='g')
                     xmin, xmax = plt.xlim()
                     x = np.linspace(xmin, xmax, 100)
-                    p = stats.skewnorm.pdf(x, a, loc_opt, scale_opt)
+                    p = stats.skewnorm.pdf(x, a_opt, loc_opt, scale_opt)
                     plt.plot(x, p, 'k', linewidth=2)
                     plt.show()
 

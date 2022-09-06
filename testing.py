@@ -2,7 +2,7 @@ from scipy import stats
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
+from scipy.optimize import minimize, fmin
 
 
 def mean_err(loc, a, scale, median_obs):
@@ -14,12 +14,23 @@ def mean_err(loc, a, scale, median_obs):
     return err
 
 
-def std_err(scale, a, loc, d16, d84):
+def std_err(scale, a, loc, std_orig):
+    if scale <= 0:
+        scale = abs(scale)
+    dist = stats.skewnorm(a, loc, scale).rvs(1000)
+    dist = dist[dist > 0.0005]
+    err = abs(np.std(dist) - std_orig)
+
+    return err
+
+
+def shape_err(a, scale, loc, d16, d84):
     dist = stats.skewnorm(a, loc, scale).rvs(1000)
     dist = dist[dist > 0.0005]
     err = abs(np.percentile(dist, 16) - d16)**2 + abs(np.percentile(dist, 84) - d84)**2
 
     return err
+
 
 
 a, loc, scale = 5, 0.015, 0.05
@@ -42,15 +53,20 @@ median_d = 0.065
 d_16 = 0.021
 d_84 = 0.138
 
-res = minimize(mean_err, loce, args=(ae, scalee, median_d), method='Nelder-Mead', tol=0.001)
-loc_opt = res.x[0]
-print(res.message)
+res = fmin(mean_err, loce, args=(ae, scalee, median_d))
+loc_opt = res[0]
+#print(res.message)
 
-res2 = minimize(std_err, scalee, args=(ae, loc_opt, d_16, d_84), method='Nelder-Mead', tol=0.001)
-scale_opt = res2.x[0]
-print(res.message)
+res2 = fmin(std_err, scalee, args=(ae, loc_opt, np.std(data)))
+scale_opt = res2[0]
+#print(res2.message)
 
-new_data = stats.skewnorm(ae, loc_opt, scale_opt).rvs(1000)
+res3 = fmin(shape_err, ae, args=(scale_opt, loc_opt, d_16, d_84))
+a_opt = res3[0]
+#print(res3.message)
+
+new_data = stats.skewnorm(a_opt, loc_opt, scale_opt).rvs(1000)
+new_data = new_data[new_data >= 0.005]
 print(len(new_data))
 plt.figure()
 plt.hist(new_data, bins=15, density=True, alpha=0.6, color='g')
