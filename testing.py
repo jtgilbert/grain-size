@@ -5,11 +5,11 @@ import pandas as pd
 from scipy.optimize import minimize
 
 
-def mean_err(loc, a, scale, mean_obs):
+def mean_err(loc, a, scale, median_obs):
     dist = stats.skewnorm(a, loc, scale).rvs(1000)
     dist = dist[dist > 0.0005]
-    mean_est = np.mean(dist)
-    err = abs(mean_est - mean_obs)
+    median_est = np.median(dist)
+    err = abs(median_est - median_obs)
 
     return err
 
@@ -38,11 +38,11 @@ p = stats.skewnorm.pdf(x, ae, loce, scalee)
 plt.plot(x, p, 'k', linewidth=2)
 plt.show()
 
-mean_d = 0.065
+median_d = 0.065
 d_16 = 0.021
 d_84 = 0.138
 
-res = minimize(mean_err, loce, args=(ae, scalee, mean_d), method='Nelder-Mead', tol=0.001)
+res = minimize(mean_err, loce, args=(ae, scalee, median_d), method='Nelder-Mead', tol=0.001)
 loc_opt = res.x[0]
 print(res.message)
 
@@ -51,6 +51,7 @@ scale_opt = res2.x[0]
 print(res.message)
 
 new_data = stats.skewnorm(ae, loc_opt, scale_opt).rvs(1000)
+print(len(new_data))
 plt.figure()
 plt.hist(new_data, bins=15, density=True, alpha=0.6, color='g')
 xmin, xmax = plt.xlim()
