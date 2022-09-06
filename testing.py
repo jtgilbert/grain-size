@@ -5,32 +5,31 @@ import pandas as pd
 from scipy.optimize import minimize, fmin
 
 
-def mean_err(loc, a, scale, median_obs):
-    dist = stats.skewnorm(a, loc, scale).rvs(1000)
+def med_err(loc, a, scale, median_obs):
+    dist = stats.skewnorm(a, loc, scale).rvs(10000)
     dist = dist[dist > 0.0005]
     median_est = np.median(dist)
-    err = abs(median_est - median_obs)
+    err = (median_est - median_obs)**2
 
     return err
 
 
-def std_err(scale, a, loc, std_orig):
+def std_err(scale, a, loc, d16, d84):
     if scale <= 0:
         scale = abs(scale)
-    dist = stats.skewnorm(a, loc, scale).rvs(1000)
+    dist = stats.skewnorm(a, loc, scale).rvs(10000)
     dist = dist[dist > 0.0005]
-    err = abs(np.std(dist) - std_orig)
+    err = (np.percentile(dist, 84)-d84)**2 + (np.percentile(dist, 16)-d16)**2
 
     return err
 
 
-def shape_err(a, scale, loc, d16, d84):
-    dist = stats.skewnorm(a, loc, scale).rvs(1000)
+def shape_err(a, scale, loc, dif):
+    dist = stats.skewnorm(a, loc, scale).rvs(10000)
     dist = dist[dist > 0.0005]
-    err = abs(np.percentile(dist, 16) - d16)**2 + abs(np.percentile(dist, 84) - d84)**2
+    err = (np.percentile(dist, 84) - np.percentile(dist, 16))**2
 
     return err
-
 
 
 a, loc, scale = 5, 0.015, 0.05
@@ -53,19 +52,20 @@ median_d = 0.065
 d_16 = 0.021
 d_84 = 0.138
 
-res = fmin(mean_err, loce, args=(ae, scalee, median_d))
+res = fmin(med_err, loce, args=(ae, scalee, median_d))
 loc_opt = res[0]
 #print(res.message)
 
-res2 = fmin(std_err, scalee, args=(ae, loc_opt, np.std(data)))
+res2 = fmin(std_err, scalee, args=(ae, loc_opt, d_16, d_84))
 scale_opt = res2[0]
 #print(res2.message)
 
-res3 = fmin(shape_err, ae, args=(scale_opt, loc_opt, d_16, d_84))
-a_opt = res3[0]
+#res3 = fmin(shape_err, ae, args=(scale_opt, loc_opt, d_84-d_16))
+#a_opt = res3[0]
 #print(res3.message)
 
-new_data = stats.skewnorm(a_opt, loc_opt, scale_opt).rvs(1000)
+print(ae, loc_opt, scale_opt)
+new_data = stats.skewnorm(ae, loc_opt, scale_opt).rvs(10000)
 new_data = new_data[new_data >= 0.005]
 print(len(new_data))
 plt.figure()
