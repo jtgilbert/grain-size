@@ -216,9 +216,15 @@ class GrainSize:
             return err
 
         def std_err(scale, a, loc, d16, d84):
-            dist = stats.skewnorm(a, loc, scale).rvs(1000)
-            dist = dist[dist > 0.0005]
-            err = abs(np.percentile(dist, 16) - d16)**2 + abs(np.percentile(dist, 84) - d84)**2
+            if scale > 0:
+                dist = stats.skewnorm(a, loc, scale).rvs(1000)
+                dist = dist[dist > 0.0005]
+                err = abs(np.percentile(dist, 16) - d16)**2 + abs(np.percentile(dist, 84) - d84)**2
+            else:
+                scale = abs(scale)
+                dist = stats.skewnorm(a, loc, scale).rvs(1000)
+                dist = dist[dist > 0.0005]
+                err = abs(np.percentile(dist, 16) - d16) ** 2 + abs(np.percentile(dist, 84) - d84) ** 2
 
             return err
 
@@ -236,17 +242,29 @@ class GrainSize:
                 print(f'finding distribution for segment {i}')
                 d_50, d_16, d_84 = (self.dn.loc[i, 'D50']/1000), (self.dn.loc[i, 'D16_low']/1000), (self.dn.loc[i, 'D84_high']/1000)
 
-                res = minimize(med_err, loc, args=(a, scale, d_50), method='Nelder-Mead', tol=0.001)
+                toler1 = 0.001
+                res = minimize(med_err, loc, args=(a, scale, d_50), method='Nelder-Mead', tol=toler1)
                 loc_opt = res.x[0]
-                if res.success is False:
-                    print('median optimization issue: ', res.message)
+                while res.success is False:
+                    toler1 += 0.001
+                    res = minimize(med_err, loc, args=(a, scale, d_50), method='Nelder-Mead', tol=toler1)
+                    loc_opt = res.x[0]
 
-                res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=0.003)
+                toler = 0.003
+                res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=toler)
                 scale_opt = res2.x[0]
-                if res2.success is False:
+                while res2.success is False:
+                    toler += 0.001
                     print('d16/d84 optimization issue: ', res2.message)
+                    res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=toler)
+                    scale_opt = res2.x[0]
+                while scale_opt <= 0:
+                    toler += 0.001
+                    res2 = minimize(std_err, scale, args=(a, loc_opt, d_16, d_84), method='Nelder-Mead', tol=toler)
+                    scale_opt = res2.x[0]
 
                 new_data = stats.skewnorm(a, loc_opt, scale_opt).rvs(1000)
+                new_data = new_data[new_data >= 0.0005]
 
                 self.gs[i]['fractions'].update({
                     '0-1': {'fraction': sum(1 for d in new_data if 0 < d <= 0.001) / len(new_data),
