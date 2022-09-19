@@ -5,7 +5,7 @@ import re
 
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 install_requires = [
-    'geopandas>=0.11', 'numpy>=1.21', 'pandas>=1.4', 'scipy>=1.9', 'scikit-learn>=1.1.2',
+    'numpy>=1.21', 'pandas>=1.4', 'scipy>=1.9', 'scikit-learn>=1.1.2', 'geopandas>=0.11'
 ]
 
 with open("README.md", "rb") as f:
