@@ -447,10 +447,12 @@ def main():
     parser.add_argument('stream_network', help='Path to stream network feature class', type=str)
     parser.add_argument('measurements', help='A list of paths to csv files containing grain size measurements; '
                                              'should have header "D" at top of column followed by individual '
-                                             'grain size measurements', type=list)
+                                             'grain size measurements',
+                        nargs='*', type=str)
     parser.add_argument('reach_ids', help='A list containing the reach IDs from the stream network feature class'
                                           'associated with the grain size measurements, in the same order as the '
-                                          'measurements', type=list)
+                                          'measurements',
+                        nargs='*', type=int)
     args = parser.parse_args()
 
     GrainSize(args.stream_network, args.measurements, args.reach_ids)
