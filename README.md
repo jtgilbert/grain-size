@@ -38,5 +38,5 @@ for example, if my stream network was 'NHDPlus_Woods_Creek.shp', and I had two m
 associated with segments 46 and 68 of the drainage network, I would enter:
 
 ```commandline
-python grain_size.py path_to_NHDPlus_Woods_Creek.shp --measurements path_to_meas_1.csv path_to_meas_2.csv --reachids 46 68
+python grain_size.py path_to_NHDPlus_Woods_Creek.shp --measurements path_to_meas_1.csv path_to_meas_2.csv --reach_ids 46 68
 ```
