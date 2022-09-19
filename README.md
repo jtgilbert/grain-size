@@ -21,20 +21,22 @@ cd grain_size_distribution
 
 and run the model using the usage below.
 ```commandline
-usage: grain_size.py [-h] stream_network measurements reach_ids
+usage: grain_size.py [-h] --measurements MEASUREMENTS [MEASUREMENTS ...] --reach_ids REACH_IDS [REACH_IDS ...] stream_network
 
 positional arguments:
-  stream_network  Path to stream network feature class
-  measurements    A list of paths to csv files containing grain size measurements; should have header "D" at top of column followed by individual grain size measurements
-  reach_ids       A list containing the reach IDs from the stream network feature classassociated with the grain size measurements, in the same order as the measurements
+  stream_network        Path to stream network feature class
 
 optional arguments:
-  -h, --help      show this help message and exit
+  -h, --help            show this help message and exit
+  --measurements MEASUREMENTS [MEASUREMENTS ...]
+                        A list of paths to csv files containing grain size measurements; should have header "D" at top of column followed by individual grain size measurements
+  --reach_ids REACH_IDS [REACH_IDS ...]
+                        A list containing the reach IDs from the stream network feature classassociated with the grain size measurements, in the same order as the measurements
 ```
 
 for example, if my stream network was 'NHDPlus_Woods_Creek.shp', and I had two measurements,
 associated with segments 46 and 68 of the drainage network, I would enter:
 
 ```commandline
-python grain_size.py path_to_NHDPlus_Woods_Creek.shp [path_to_meas_1.csv, path_to_meas_2.csv] [46, 68]
+python grain_size.py path_to_NHDPlus_Woods_Creek.shp --measurements path_to_meas_1.csv path_to_meas_2.csv --reachids 46 68
 ```
