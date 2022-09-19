@@ -8,7 +8,7 @@ install_requires = [
     'geopandas>=0.11', 'numpy>=1.21', 'pandas>=1.4', 'scipy>=1.9', 'scikit-learn>=1.1.2',
 ]
 
-with open("README.md" "rb") as f:
+with open("README.md", "rb") as f:
     long_descr = f.read().decode("utf-8")
 
 version = re.search(
