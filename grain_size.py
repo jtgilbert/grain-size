@@ -1,5 +1,6 @@
 import os
 import json
+import argparse
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -386,11 +387,8 @@ class GrainSize:
                 '2-4': {'fraction': sum(1 for d in new_data if 0.002 < d <= 0.004) / len(new_data),
                         'lower': 0.002,
                         'upper': 0.004},
-                '4-6': {'fraction': sum(1 for d in new_data if 0.004 < d <= 0.006) / len(new_data),
+                '4-8': {'fraction': sum(1 for d in new_data if 0.004 < d <= 0.008) / len(new_data),
                         'lower': 0.004,
-                        'upper': 0.006},
-                '6-8': {'fraction': sum(1 for d in new_data if 0.006 < d <= 0.008) / len(new_data),
-                        'lower': 0.006,
                         'upper': 0.008},
                 '8-12': {'fraction': sum(1 for d in new_data if 0.008 < d <= 0.012) / len(new_data),
                          'lower': 0.008,
@@ -443,6 +441,21 @@ class GrainSize:
         with open(os.path.join(os.path.dirname(self.streams), 'stream_segment_grain_sizes.json'), 'w') as f:
             json.dump(self.gs, f, indent=4)
 
+def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('stream_network', help='Path to stream network feature class', type=str)
+    parser.add_argument('measurements', help='A list of paths to csv files containing grain size measurements; '
+                                             'should have header "D" at top of column followed by individual '
+                                             'grain size measurements', type=list)
+    parser.add_argument('reach_ids', help='A list containing the reach IDs from the stream network feature class'
+                                          'associated with the grain size measurements, in the same order as the '
+                                          'measurements', type=list)
+    args = parser.parse_args()
+
+    GrainSize(args.stream_network, args.measurements, args.reach_ids)
+
 
 if __name__ == '__main__':
-    GrainSize(network='./Input_data/NHDPlus_Roaring_Lion.shp', measurements=['./Input_data/RL_avalanche_D.csv', './Input_data/RL_xing_D.csv'], reach_ids=[46, 41])
+    main()
+    #GrainSize(network='./Input_data/NHDPlus_Woods.shp', measurements=['./Input_data/Woods_D.csv'], reach_ids=[41])
