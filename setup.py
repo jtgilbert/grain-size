@@ -13,7 +13,7 @@ with open("README.md", "rb") as f:
 
 version = re.search(
     '^__version__\\s*=\\s*"(.*)"',
-    open('__version__.py').read(),
+    open('grain_size_distribution/__version__.py').read(),
     re.M
 ).group(1)
 
@@ -28,10 +28,10 @@ setup(name='grain_size_distributions',
       zip_safe=False,
       entry_points={
           "console_scripts": [
-              'grain_size = grain_size:main'
+              'grain_size = grain_size_distribution.grain_size:main'
           ]
       },
       url='https://github.com/jtgilbert/grain-size',
       packages=[
-          'grain_size'
+          'grain_size_distribution'
       ])
