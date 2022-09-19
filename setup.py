@@ -27,7 +27,9 @@ setup(name='grain_size_distributions',
       install_requires=install_requires,
       zip_safe=False,
       entry_points={
-          "console_scripts": ['grain_size:main']
+          "console_scripts": [
+              'grain_size = grain_size:main'
+          ]
       },
       url='https://github.com/jtgilbert/grain-size',
       packages=[
