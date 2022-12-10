@@ -18,7 +18,7 @@ class GrainSize:
     a drainage network using one or more field measurements of grain size distribution
     """
 
-    def __init__(self, network, measurements, reach_ids, minimum_fraction=0.01):
+    def __init__(self, network, measurements, reach_ids, da_field, max_size=3, minimum_fraction=0.01):
 
         if len(measurements) != len(reach_ids):
             raise Exception('Different number of measurements and associated reach IDs entered')
@@ -26,13 +26,23 @@ class GrainSize:
         self.streams = network
         self.measurements = measurements
         self.reach_ids = reach_ids
+        self.da_field = da_field
+        self.max_size = max_size
         self.minimum_frac = minimum_fraction
         self.dn = gpd.read_file(network)
+
+        # check for drainage area field and slope field in input network
+        if da_field not in self.dn.columns:
+            raise Exception(f'Drainage Area field {da_field} missing from input drainage network attributes')
+        if 'Slope' not in self.dn.columns:
+            raise Exception("'Slope' field missing from input drainage network attributes")
 
         self.reach_stats = {}  # {reach: {slope: val, drain_area: val, d16: val, d50: val, d84: val}, reach: {}}
         for i, meas in enumerate(measurements):
             df = pd.read_csv(meas)
             df['D'] = df['D'] / 1000  # converting from mm to m
+
+            dmax = max(df['D'])
 
             # bootstrap the data to get range
             num_boots = 100
@@ -55,7 +65,7 @@ class GrainSize:
 
             self.reach_stats[reach_ids[i]] = {
                 'slope': self.dn.loc[reach_ids[i], 'Slope'],
-                'drain_area': self.dn.loc[reach_ids[i], 'TotDASqKm'],  # might need to change to DivDA
+                'drain_area': self.dn.loc[reach_ids[i], self.da_field],  # might need to change to DivDA
                 'd16': np.percentile(df['D'], 16),
                 'd16_low': low_d16,
                 'd16_high': high_d16,
@@ -64,8 +74,36 @@ class GrainSize:
                 'd50_high': high_d50,
                 'd84': np.percentile(df['D'], 84),
                 'd84_low': low_d84,
-                'd84_high': high_d84
+                'd84_high': high_d84,
+                'dmax': dmax
             }
+
+        # generate function for predicting roughness, and d16/d50 from slope if there's more than one measurement
+        if len(self.reach_stats) > 1:
+            roughness = [stats['d84'] / stats['d50'] for id, stats in self.reach_stats.items()]
+            d16_rat = [stats['d16'] / stats['d50'] for id, stats in self.reach_stats.items()]
+            slope = [stats['slope'] for id, stats in self.reach_stats.items()]
+            rough_params = np.polyfit(slope, roughness, 1)
+            d16_rat_params = np.polyfit(d16_rat, slope, 1)
+            # might need to check that it can't be <0
+            self.rough_coef, self.rough_rem = rough_params[0], rough_params[1]
+            self.d16_coef, self.d16_rem = d16_rat_params[0], d16_rat_params[1]
+            self.roughness_type = 'function'
+        else:
+            self.roughness = self.reach_stats[self.reach_ids[0]]['d84']/self.reach_stats[self.reach_ids[0]]['d50']
+            self.d16_rat = self.reach_stats[self.reach_ids[0]]['d16']/self.reach_stats[self.reach_ids[0]]['d50']
+            self.roughness_type = 'value'
+
+        # get dmax params or scalar
+        if len(self.reach_stats) > 1:
+            maxvals = [atts['dmax'] for _, atts in self.reach_stats.items()]
+            maxd84s = [atts['d84'] for _, atts in self.reach_stats.items()]
+            slopevals = [atts['slope'] for _, atts in self.reach_stats.items()]
+            self.dmax_params = np.polyfit(slopevals, maxvals, 1)
+            self.dmax_ratio = np.average([maxvals[i]/maxd84s[i] for i in range(len(maxvals))])
+        else:
+            self.dmax_params = [atts['dmax']/atts['dmax'] for _, atts in self.reach_stats.items()]
+            self.dmax_ratio = self.dmax_params[0]
 
         self.find_crit_depth()
         self.get_hydraulic_geom_coef()
@@ -80,21 +118,28 @@ class GrainSize:
         rho = 1000  # density of water
 
         for reachid, vals in self.reach_stats.items():
-            tau_c_star_16 = 0.038 * (vals['d16'] / vals['d50']) ** -0.65
+            roughness = vals['d84'] / vals['d50']
+            if roughness <= 2:
+                tau_coef = 0.025
+            elif 2 < roughness < 3.5:
+                tau_coef = 0.087 * np.log(roughness) - 0.034
+            else:
+                tau_coef = 0.073
+            tau_c_star_16 = tau_coef * (vals['d16'] / vals['d50']) ** -0.68
             tau_c_16 = tau_c_star_16 * (rho_s - rho) * 9.81 * vals['d16']
             h_c_16 = tau_c_16 / (rho * 9.81 * vals['slope'])
             tau_c_16_low = tau_c_star_16 * (rho_s - rho) * 9.81 * vals['d16_low']
             h_c_16_low = tau_c_16_low / (rho * 9.81 * vals['slope'])
             tau_c_16_high = tau_c_star_16 * (rho_s - rho) * 9.81 * vals['d16_high']
             h_c_16_high = tau_c_16_high / (rho * 9.81 * vals['slope'])
-            tau_c_star_50 = 0.038
+            tau_c_star_50 = tau_coef
             tau_c_50 = tau_c_star_50 * (rho_s - rho) * 9.81 * vals['d50']
             h_c_50 = tau_c_50 / (rho * 9.81 * vals['slope'])
             tau_c_50_low = tau_c_star_50 * (rho_s - rho) * 9.81 * vals['d50_low']
             h_c_50_low = tau_c_50_low / (rho * 9.81 * vals['slope'])
             tau_c_50_high = tau_c_star_50 * (rho_s - rho) * 9.81 * vals['d50_high']
             h_c_50_high = tau_c_50_high / (rho * 9.81 * vals['slope'])
-            tau_c_star_84 = 0.038 * (vals['d84'] / vals['d50']) ** -0.65
+            tau_c_star_84 = tau_coef * (vals['d84'] / vals['d50']) ** -0.68
             tau_c_84 = tau_c_star_84 * (rho_s - rho) * 9.81 * vals['d84']
             h_c_84 = tau_c_84 / (rho * 9.81 * vals['slope'])
             tau_c_84_low = tau_c_star_84 * (rho_s - rho) * 9.81 * vals['d84_low']
@@ -168,15 +213,26 @@ class GrainSize:
                 coefs['84']['high'].append(vals['h_coef_84_high'])
                 coefs['84']['slope'].append(vals['slope'])
 
-            low_16_a, low_16_b = np.polyfit(coefs['16']['slope'], coefs['16']['low'], 1)
-            mid_16_a, mid_16_b = np.polyfit(coefs['16']['slope'], coefs['16']['mid'], 1)
-            high_16_a, high_16_b = np.polyfit(coefs['16']['slope'], coefs['16']['high'], 1)
-            low_50_a, low_50_b = np.polyfit(coefs['50']['slope'], coefs['50']['low'], 1)
-            mid_50_a, mid_50_b = np.polyfit(coefs['50']['slope'], coefs['50']['mid'], 1)
-            high_50_a, high_50_b = np.polyfit(coefs['50']['slope'], coefs['50']['high'], 1)
-            low_84_a, low_84_b = np.polyfit(coefs['84']['slope'], coefs['84']['low'], 1)
-            mid_84_a, mid_84_b = np.polyfit(coefs['84']['slope'], coefs['84']['mid'], 1)
-            high_84_a, high_84_b = np.polyfit(coefs['84']['slope'], coefs['84']['high'], 1)
+            for i, vals in coefs.items():
+                for key in vals.keys():
+                    if key == 'slope':
+                        vals[key].append(0.0001)
+                    else:
+                        vals[key].append(0.05)
+
+            #logvals = np.log(coefs['16']['slope'])
+
+            low_16_a, low_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['low']), 1)
+            mid_16_a, mid_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['mid']), 1)
+            high_16_a, high_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['high']), 1)
+            low_50_a, low_50_b = np.polyfit(np.log(coefs['50']['slope']), np.log(coefs['50']['low']), 1)
+            mid_50_a, mid_50_b = np.polyfit(np.log(coefs['50']['slope']), np.log(coefs['50']['mid']), 1)
+            high_50_a, high_50_b = np.polyfit(np.log(coefs['50']['slope']), np.log(coefs['50']['high']), 1)
+            low_84_a, low_84_b = np.polyfit(np.log(coefs['84']['slope']), np.log(coefs['84']['low']), 1)
+            mid_84_a, mid_84_b = np.polyfit(np.log(coefs['84']['slope']), np.log(coefs['84']['mid']), 1)
+            high_84_a, high_84_b = np.polyfit(np.log(coefs['84']['slope']), np.log(coefs['84']['high']), 1)
+
+            low_16_b, mid_16_b, high_16_b, low_50_b, mid_50_b, high_50_b, low_84_b, mid_84_b, high_84_b = np.exp(low_16_b), np.exp(mid_16_b), np.exp(high_16_b), np.exp(low_50_b), np.exp(mid_50_b), np.exp(high_50_b), np.exp(low_84_b), np.exp(mid_84_b), np.exp(high_84_b)
 
             self.reach_stats.update({'coefs':
                                          {'h_coef_16': [mid_16_a, mid_16_b],
@@ -196,104 +252,118 @@ class GrainSize:
         stats_dict = {}
         for i in self.dn.index:
             print(f'Estimating D50, D16, D84 for segment : {i}')
-            if self.reach_stats['coef_type'] == 'value':
-                h_c_50 = self.reach_stats['coefs']['h_coef_50'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+            if self.roughness_type == 'function':
+                rough = self.rough_coef*self.dn.loc[i, 'Slope']+self.rough_rem
+                d16_rat = self.d16_coef*self.dn.loc[i, 'Slope']+self.d16_rem
             else:
-                coefval = self.reach_stats['coefs']['h_coef_50'][0]*self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_50'][1]
-                h_c_50 = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                rough = self.roughness
+                d16_rat = self.d16_rat
+            if rough <= 2:
+                tau_coef = 0.025
+            elif 2 < rough < 3.5:
+                tau_coef = 0.087 * np.log(rough) - 0.034
+            else:
+                tau_coef = 0.073
+            if d16_rat < 0.1:
+                d16_rat = 0.1  # this is kind of janky to just set a fixed value...
+
+            if self.reach_stats['coef_type'] == 'value':
+                h_c_50 = self.reach_stats['coefs']['h_coef_50'] * self.dn.loc[i, self.da_field] ** 0.4
+            else:
+                coefval = self.reach_stats['coefs']['h_coef_50'][1]*self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_50'][0]
+                h_c_50 = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_50 = 1000 * 9.81 * h_c_50 * self.dn.loc[i, 'Slope']
-            d50 = tau_c_50 / ((2650 - 1000) * 9.81 * 0.038)
+            d50 = tau_c_50 / ((2650 - 1000) * 9.81 * tau_coef)
             self.dn.loc[i, 'D50'] = d50 * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_50_low = self.reach_stats['coefs']['h_coef_50_low'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_50_low = self.reach_stats['coefs']['h_coef_50_low'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_50_low'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_50_low'][1]
-                h_c_50_low = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_50_low'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_50_low'][0]
+                h_c_50_low = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_50_low = 1000 * 9.81 * h_c_50_low * self.dn.loc[i, 'Slope']
-            d50_low = tau_c_50_low / ((2650 - 1000) * 9.81 * 0.038)
+            d50_low = tau_c_50_low / ((2650 - 1000) * 9.81 * tau_coef)
             self.dn.loc[i, 'D50_low'] = d50_low * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_50_high = self.reach_stats['coefs']['h_coef_50_high'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_50_high = self.reach_stats['coefs']['h_coef_50_high'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_50_high'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_50_high'][1]
-                h_c_50_high = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_50_high'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_50_high'][0]
+                h_c_50_high = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_50_high = 1000 * 9.81 * h_c_50_high * self.dn.loc[i, 'Slope']
-            d50_high = tau_c_50_high / ((2650 - 1000) * 9.81 * 0.038)
+            d50_high = tau_c_50_high / ((2650 - 1000) * 9.81 * tau_coef)
             self.dn.loc[i, 'D50_high'] = d50_high * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_16 = self.reach_stats['coefs']['h_coef_16'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_16 = self.reach_stats['coefs']['h_coef_16'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_16'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_16'][1]
-                h_c_16 = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_16'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_16'][0]
+                h_c_16 = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_16 = 1000 * 9.81 * h_c_16 * self.dn.loc[i, 'Slope']
-            tau_c_star_16 = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d16'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_16 = tau_coef * d16_rat ** -0.68
             d16 = tau_c_16 / ((2650 - 1000) * 9.81 * tau_c_star_16)
             self.dn.loc[i, 'D16'] = d16 * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_16_low = self.reach_stats['coefs']['h_coef_16_low'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_16_low = self.reach_stats['coefs']['h_coef_16_low'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_16_low'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_16_low'][1]
-                h_c_16_low = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_16_low'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_16_low'][0]
+                h_c_16_low = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_16_low = 1000 * 9.81 * h_c_16_low * self.dn.loc[i, 'Slope']
-            tau_c_star_16_low = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d16_low'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_16_low = tau_coef * d16_rat ** -0.68
             d16_low = tau_c_16_low / ((2650 - 1000) * 9.81 * tau_c_star_16_low)
             self.dn.loc[i, 'D16_low'] = d16_low * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_16_high = self.reach_stats['coefs']['h_coef_16_high'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_16_high = self.reach_stats['coefs']['h_coef_16_high'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_16_high'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_16_high'][1]
-                h_c_16_high = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_16_high'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_16_high'][0]
+                h_c_16_high = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_16_high = 1000 * 9.81 * h_c_16_high * self.dn.loc[i, 'Slope']
-            tau_c_star_16_high = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d16_high'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_16_high = tau_coef * d16_rat ** -0.68
             d16_high = tau_c_16_high / ((2650 - 1000) * 9.81 * tau_c_star_16_high)
             self.dn.loc[i, 'D16_high'] = d16_high * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_84 = self.reach_stats['coefs']['h_coef_84'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_84 = self.reach_stats['coefs']['h_coef_84'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_84'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_84'][1]
-                h_c_84 = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_84'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_84'][0]
+                h_c_84 = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_84 = 1000 * 9.81 * h_c_84 * self.dn.loc[i, 'Slope']
-            tau_c_star_84 = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d84'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_84 = tau_coef * rough ** -0.68
             d84 = tau_c_84 / ((2650 - 1000) * 9.81 * tau_c_star_84)
             self.dn.loc[i, 'D84'] = d84 * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_84_low = self.reach_stats['coefs']['h_coef_84_low'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_84_low = self.reach_stats['coefs']['h_coef_84_low'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_84_low'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_84_low'][1]
-                h_c_84_low = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_84_low'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_84_low'][0]
+                h_c_84_low = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_84_low = 1000 * 9.81 * h_c_84_low * self.dn.loc[i, 'Slope']
-            tau_c_star_84_low = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d84_low'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_84_low = tau_coef * rough ** -0.68
             d84_low = tau_c_84_low / ((2650 - 1000) * 9.81 * tau_c_star_84_low)
             self.dn.loc[i, 'D84_low'] = d84_low * 1000
 
             if self.reach_stats['coef_type'] == 'value':
-                h_c_84_high = self.reach_stats['coefs']['h_coef_84_high'] * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                h_c_84_high = self.reach_stats['coefs']['h_coef_84_high'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
-                coefval = self.reach_stats['coefs']['h_coef_84_high'][0] * self.dn.loc[i, 'Slope'] + self.reach_stats['coefs']['h_coef_84_high'][1]
-                h_c_84_high = coefval * self.dn.loc[i, 'TotDASqKm'] ** 0.4
+                coefval = self.reach_stats['coefs']['h_coef_84_high'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_84_high'][0]
+                h_c_84_high = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_84_high = 1000 * 9.81 * h_c_84_high * self.dn.loc[i, 'Slope']
-            tau_c_star_84_high = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d84_high'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_84_high = tau_coef * rough ** -0.68
             d84_high = tau_c_84_high / ((2650 - 1000) * 9.81 * tau_c_star_84_high)
             self.dn.loc[i, 'D84_high'] = d84_high * 1000
+
+            if len(self.dmax_params) > 1:
+                dmax = self.dn.loc[i, 'Slope']*self.dmax_params[0] + self.dmax_params[1]
+            else:
+                dmax = d84 * self.dmax_params[0]
+            if dmax < d84:
+                dmax = d84 * self.dmax_ratio
+            if dmax > self.max_size:
+                dmax = self.max_size
+
+            self.dn.loc[i, 'Dmax'] = dmax * 1000
 
             stats_dict[i] = {
                 'd50': d50,
@@ -305,6 +375,7 @@ class GrainSize:
                 'd84': d84,
                 'd84_low': d84_low,
                 'd84_high': d84_high,
+                'dmax': dmax,
                 'fractions': {}
             }
 
@@ -322,6 +393,8 @@ class GrainSize:
             return err
 
         def std_err(scale, loc, d16, d84):
+            if scale < 0.05:
+                scale = 0.05
             dist = stats.norm(loc, scale).rvs(10000)
             dist = dist**2
             dist = dist[dist > 0.0005]
@@ -360,23 +433,24 @@ class GrainSize:
 
         for i in self.dn.index:
             print(f'finding distribution for segment {i}')
-            d_50, d_16, d_84 = (self.dn.loc[i, 'D50'] / 1000), (self.dn.loc[i, 'D16_low'] / 1000), (
-                        self.dn.loc[i, 'D84_high'] / 1000)
+            d_50, d_16, d_84 = (self.dn.loc[i, 'D50'] / 1000), (self.dn.loc[i, 'D16'] / 1000), (
+                        self.dn.loc[i, 'D84'] / 1000)
 
             res = fmin(med_err, loc, args=(scale, d_50))
             loc_opt = res[0]
 
             res2 = fmin(std_err, scale, args=(loc_opt, d_16, d_84))
             scale_opt = res2[0]
-            # while scale_opt <= 0:
-            #    res2 = fmin(std_err, np.array((abs(scale_opt), a)), args=(loc_opt, d_84-d_16))
-            #    scale_opt = res2[0]
+            while scale_opt <= 0:
+               res2 = fmin(std_err, abs(scale_opt), args=(loc_opt, d_16, d_84))
+               scale_opt = res2[0]
 
             new_data = stats.norm(loc_opt, scale_opt).rvs(10000)
             new_data = new_data**2
             new_data = new_data[new_data >= 0.0005]
+            new_data = new_data[new_data<self.dn.loc[i, 'Dmax']/1000]
 
-            self.gs[i].update({'Dmax': max(new_data)})
+            #self.gs[i].update({'Dmax': max(new_data)})
             self.gs[i]['fractions'].update({
                 '0-1': {'fraction': sum(1 for d in new_data if 0 < d <= 0.001) / len(new_data),
                         'lower': 0,
@@ -425,14 +499,6 @@ class GrainSize:
                          'upper': 512}
             })
 
-            # if i in [11, 25]:
-            #     plt.figure()
-            #     plt.hist(new_data, bins=15, density=True, alpha=0.6, color='g')
-            #     xmin, xmax = plt.xlim()
-            #     x = np.linspace(xmin, xmax, 100)
-            #     p = stats.skewnorm.pdf(x, a, loc_opt, scale_opt)
-            #     plt.plot(x, p, 'k', linewidth=2)
-            #     plt.show()
 
     def save_network(self):
         self.dn.to_file(self.streams)
@@ -460,4 +526,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-    #GrainSize(network='./Input_data/NHDPlus_Woods.shp', measurements=['./Input_data/Woods_D.csv'], reach_ids=[41])
+
+# GrainSize(network='../Input_data/Roaring_Lion_custom.shp', measurements=['../Input_data/RL_avalanche_D.csv', '../Input_data/RL_xing_D.csv'], da_field='Drain_Area', reach_ids=[118, 149])
