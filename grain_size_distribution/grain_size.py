@@ -78,6 +78,22 @@ class GrainSize:
                 'dmax': dmax
             }
 
+        # generate function for predicting roughness, and d16/d50 from slope if there's more than one measurement
+        if len(self.reach_stats) > 1:
+            roughness = [stats['d84'] / stats['d50'] for id, stats in self.reach_stats.items()]
+            d16_rat = [stats['d16'] / stats['d50'] for id, stats in self.reach_stats.items()]
+            slope = [stats['slope'] for id, stats in self.reach_stats.items()]
+            rough_params = np.polyfit(slope, roughness, 1)
+            d16_rat_params = np.polyfit(d16_rat, slope, 1)
+            # might need to check that it can't be <0
+            self.rough_coef, self.rough_rem = rough_params[0], rough_params[1]
+            self.d16_coef, self.d16_rem = d16_rat_params[0], d16_rat_params[1]
+            self.roughness_type = 'function'
+        else:
+            self.roughness = self.reach_stats[self.reach_ids[0]]['d84']/self.reach_stats[self.reach_ids[0]]['d50']
+            self.d16_rat = self.reach_stats[self.reach_ids[0]]['d16']/self.reach_stats[self.reach_ids[0]]['d50']
+            self.roughness_type = 'value'
+
         # get dmax params or scalar
         if len(self.reach_stats) > 1:
             maxvals = [atts['dmax'] for _, atts in self.reach_stats.items()]
@@ -109,7 +125,7 @@ class GrainSize:
                 tau_coef = 0.087 * np.log(roughness) - 0.034
             else:
                 tau_coef = 0.073
-            tau_c_star_16 = tau_coef * (vals['d16'] / vals['d50']) ** -0.65
+            tau_c_star_16 = tau_coef * (vals['d16'] / vals['d50']) ** -0.68
             tau_c_16 = tau_c_star_16 * (rho_s - rho) * 9.81 * vals['d16']
             h_c_16 = tau_c_16 / (rho * 9.81 * vals['slope'])
             tau_c_16_low = tau_c_star_16 * (rho_s - rho) * 9.81 * vals['d16_low']
@@ -123,7 +139,7 @@ class GrainSize:
             h_c_50_low = tau_c_50_low / (rho * 9.81 * vals['slope'])
             tau_c_50_high = tau_c_star_50 * (rho_s - rho) * 9.81 * vals['d50_high']
             h_c_50_high = tau_c_50_high / (rho * 9.81 * vals['slope'])
-            tau_c_star_84 = tau_coef * (vals['d84'] / vals['d50']) ** -0.65
+            tau_c_star_84 = tau_coef * (vals['d84'] / vals['d50']) ** -0.68
             tau_c_84 = tau_c_star_84 * (rho_s - rho) * 9.81 * vals['d84']
             h_c_84 = tau_c_84 / (rho * 9.81 * vals['slope'])
             tau_c_84_low = tau_c_star_84 * (rho_s - rho) * 9.81 * vals['d84_low']
@@ -236,13 +252,28 @@ class GrainSize:
         stats_dict = {}
         for i in self.dn.index:
             print(f'Estimating D50, D16, D84 for segment : {i}')
+            if self.roughness_type == 'function':
+                rough = self.rough_coef*self.dn.loc[i, 'Slope']+self.rough_rem
+                d16_rat = self.d16_coef*self.dn.loc[i, 'Slope']+self.d16_rem
+            else:
+                rough = self.roughness
+                d16_rat = self.d16_rat
+            if rough <= 2:
+                tau_coef = 0.025
+            elif 2 < rough < 3.5:
+                tau_coef = 0.087 * np.log(rough) - 0.034
+            else:
+                tau_coef = 0.073
+            if d16_rat < 0.1:
+                d16_rat = 0.1  # this is kind of janky to just set a fixed value...
+
             if self.reach_stats['coef_type'] == 'value':
                 h_c_50 = self.reach_stats['coefs']['h_coef_50'] * self.dn.loc[i, self.da_field] ** 0.4
             else:
                 coefval = self.reach_stats['coefs']['h_coef_50'][1]*self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_50'][0]
                 h_c_50 = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_50 = 1000 * 9.81 * h_c_50 * self.dn.loc[i, 'Slope']
-            d50 = tau_c_50 / ((2650 - 1000) * 9.81 * 0.038)
+            d50 = tau_c_50 / ((2650 - 1000) * 9.81 * tau_coef)
             self.dn.loc[i, 'D50'] = d50 * 1000
 
             if self.reach_stats['coef_type'] == 'value':
@@ -251,7 +282,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_50_low'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_50_low'][0]
                 h_c_50_low = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_50_low = 1000 * 9.81 * h_c_50_low * self.dn.loc[i, 'Slope']
-            d50_low = tau_c_50_low / ((2650 - 1000) * 9.81 * 0.038)
+            d50_low = tau_c_50_low / ((2650 - 1000) * 9.81 * tau_coef)
             self.dn.loc[i, 'D50_low'] = d50_low * 1000
 
             if self.reach_stats['coef_type'] == 'value':
@@ -260,7 +291,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_50_high'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_50_high'][0]
                 h_c_50_high = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_50_high = 1000 * 9.81 * h_c_50_high * self.dn.loc[i, 'Slope']
-            d50_high = tau_c_50_high / ((2650 - 1000) * 9.81 * 0.038)
+            d50_high = tau_c_50_high / ((2650 - 1000) * 9.81 * tau_coef)
             self.dn.loc[i, 'D50_high'] = d50_high * 1000
 
             if self.reach_stats['coef_type'] == 'value':
@@ -269,9 +300,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_16'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_16'][0]
                 h_c_16 = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_16 = 1000 * 9.81 * h_c_16 * self.dn.loc[i, 'Slope']
-            tau_c_star_16 = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d16'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_16 = tau_coef * d16_rat ** -0.68
             d16 = tau_c_16 / ((2650 - 1000) * 9.81 * tau_c_star_16)
             self.dn.loc[i, 'D16'] = d16 * 1000
 
@@ -281,9 +310,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_16_low'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_16_low'][0]
                 h_c_16_low = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_16_low = 1000 * 9.81 * h_c_16_low * self.dn.loc[i, 'Slope']
-            tau_c_star_16_low = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d16_low'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_16_low = tau_coef * d16_rat ** -0.68
             d16_low = tau_c_16_low / ((2650 - 1000) * 9.81 * tau_c_star_16_low)
             self.dn.loc[i, 'D16_low'] = d16_low * 1000
 
@@ -293,9 +320,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_16_high'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_16_high'][0]
                 h_c_16_high = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_16_high = 1000 * 9.81 * h_c_16_high * self.dn.loc[i, 'Slope']
-            tau_c_star_16_high = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d16_high'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_16_high = tau_coef * d16_rat ** -0.68
             d16_high = tau_c_16_high / ((2650 - 1000) * 9.81 * tau_c_star_16_high)
             self.dn.loc[i, 'D16_high'] = d16_high * 1000
 
@@ -305,9 +330,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_84'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_84'][0]
                 h_c_84 = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_84 = 1000 * 9.81 * h_c_84 * self.dn.loc[i, 'Slope']
-            tau_c_star_84 = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d84'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_84 = tau_coef * rough ** -0.68
             d84 = tau_c_84 / ((2650 - 1000) * 9.81 * tau_c_star_84)
             self.dn.loc[i, 'D84'] = d84 * 1000
 
@@ -317,9 +340,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_84_low'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_84_low'][0]
                 h_c_84_low = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_84_low = 1000 * 9.81 * h_c_84_low * self.dn.loc[i, 'Slope']
-            tau_c_star_84_low = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d84_low'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_84_low = tau_coef * rough ** -0.68
             d84_low = tau_c_84_low / ((2650 - 1000) * 9.81 * tau_c_star_84_low)
             self.dn.loc[i, 'D84_low'] = d84_low * 1000
 
@@ -329,9 +350,7 @@ class GrainSize:
                 coefval = self.reach_stats['coefs']['h_coef_84_high'][1] * self.dn.loc[i, 'Slope']**self.reach_stats['coefs']['h_coef_84_high'][0]
                 h_c_84_high = coefval * self.dn.loc[i, self.da_field] ** 0.4
             tau_c_84_high = 1000 * 9.81 * h_c_84_high * self.dn.loc[i, 'Slope']
-            tau_c_star_84_high = 0.038 * (
-                        self.reach_stats[self.reach_ids[0]]['d84_high'] / self.reach_stats[self.reach_ids[0]][
-                    'd50']) ** -0.65
+            tau_c_star_84_high = tau_coef * rough ** -0.68
             d84_high = tau_c_84_high / ((2650 - 1000) * 9.81 * tau_c_star_84_high)
             self.dn.loc[i, 'D84_high'] = d84_high * 1000
 
@@ -480,14 +499,6 @@ class GrainSize:
                          'upper': 512}
             })
 
-            # if i in [11, 25]:
-            #     plt.figure()
-            #     plt.hist(new_data, bins=15, density=True, alpha=0.6, color='g')
-            #     xmin, xmax = plt.xlim()
-            #     x = np.linspace(xmin, xmax, 100)
-            #     p = stats.skewnorm.pdf(x, a, loc_opt, scale_opt)
-            #     plt.plot(x, p, 'k', linewidth=2)
-            #     plt.show()
 
     def save_network(self):
         self.dn.to_file(self.streams)
@@ -513,7 +524,7 @@ def main():
     GrainSize(args.stream_network, args.measurements, args.reach_ids)
 
 
-# if __name__ == '__main__':
-#    main()
-#
-GrainSize(network='../Input_data/Roaring_Lion_custom.shp', measurements=['../Input_data/RL_avalanche_D.csv', '../Input_data/RL_xing_D.csv'], da_field='Drain_Area', reach_ids=[118, 149])
+if __name__ == '__main__':
+    main()
+
+# GrainSize(network='../Input_data/Roaring_Lion_custom.shp', measurements=['../Input_data/RL_avalanche_D.csv', '../Input_data/RL_xing_D.csv'], da_field='Drain_Area', reach_ids=[118, 149])
