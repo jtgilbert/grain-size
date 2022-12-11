@@ -519,11 +519,13 @@ def main():
                                           'associated with the grain size measurements, in the same order as the '
                                           'measurements',
                         nargs='+', type=int, required=True)
-    parser.add_argument('da_field', help='The name of the field in the network attribute table containing values for'
-                                         'upstream contributing drainage area', type=str)
-    parser.add_argument('max_size', help='A maximum grain size for all reaches in meters (default is 3 m)', type=float)
-    parser.add_argument('min_fraction', help='A minimum proportion of the bed distribution to assign to each grain '
-                                             'size class (default is 0.005', type=float)
+    parser.add_argument('--da_field', help='The name of the field in the network attribute table containing values for'
+                                         'upstream contributing drainage area', type=str, required=True)
+    parser.add_argument('--max_size', help='A maximum grain size for all reaches in meters (default is 3 m)',
+                        type=float, required=True, default=3)
+    parser.add_argument('--min_fraction', help='A minimum proportion of the bed distribution to assign to each grain '
+                                             'size class (default is 0.005', type=float, required=True, default=0.005)
+
     args = parser.parse_args()
 
     GrainSize(args.stream_network, args.measurements, args.reach_ids, args.da_field, args.max_size, args.min_fraction)
