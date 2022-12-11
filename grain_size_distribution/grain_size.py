@@ -102,7 +102,7 @@ class GrainSize:
             self.dmax_params = np.polyfit(slopevals, maxvals, 1)
             self.dmax_ratio = np.average([maxvals[i]/maxd84s[i] for i in range(len(maxvals))])
         else:
-            self.dmax_params = [atts['dmax']/atts['dmax'] for _, atts in self.reach_stats.items()]
+            self.dmax_params = [atts['dmax']/atts['d84'] for _, atts in self.reach_stats.items()]
             self.dmax_ratio = self.dmax_params[0]
 
         self.find_crit_depth()
@@ -357,7 +357,7 @@ class GrainSize:
             if len(self.dmax_params) > 1:
                 dmax = self.dn.loc[i, 'Slope']*self.dmax_params[0] + self.dmax_params[1]
             else:
-                dmax = d84 * self.dmax_params[0]
+                dmax = d84 * self.dmax_ratio
             if dmax < d84:
                 dmax = d84 * self.dmax_ratio
             if dmax > self.max_size:
