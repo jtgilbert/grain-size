@@ -18,7 +18,7 @@ class GrainSize:
     a drainage network using one or more field measurements of grain size distribution
     """
 
-    def __init__(self, network, measurements, reach_ids, da_field, max_size=3, minimum_fraction=0.01):
+    def __init__(self, network, measurements, reach_ids, da_field, max_size=3, minimum_fraction=0.005):
 
         if len(measurements) != len(reach_ids):
             raise Exception('Different number of measurements and associated reach IDs entered')
@@ -519,9 +519,14 @@ def main():
                                           'associated with the grain size measurements, in the same order as the '
                                           'measurements',
                         nargs='+', type=int, required=True)
+    parser.add_argument('da_field', help='The name of the field in the network attribute table containing values for'
+                                         'upstream contributing drainage area', type=str)
+    parser.add_argument('max_size', help='A maximum grain size for all reaches in meters (default is 3 m)', type=float)
+    parser.add_argument('min_fraction', help='A minimum proportion of the bed distribution to assign to each grain '
+                                             'size class (default is 0.005', type=float)
     args = parser.parse_args()
 
-    GrainSize(args.stream_network, args.measurements, args.reach_ids)
+    GrainSize(args.stream_network, args.measurements, args.reach_ids, args.da_field, args.max_size, args.min_fraction)
 
 
 if __name__ == '__main__':

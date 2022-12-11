@@ -21,10 +21,13 @@ cd grain_size_distribution
 
 and run the model using the usage below.
 ```commandline
-usage: grain_size.py [-h] --measurements MEASUREMENTS [MEASUREMENTS ...] --reach_ids REACH_IDS [REACH_IDS ...] stream_network
+usage: grain_size.py [-h] --measurements MEASUREMENTS [MEASUREMENTS ...] --reach_ids REACH_IDS [REACH_IDS ...] stream_network da_field max_size min_fraction
 
 positional arguments:
   stream_network        Path to stream network feature class
+  da_field              The name of the field in the network attribute table containing values forupstream contributing drainage area
+  max_size              A maximum grain size for all reaches in meters (default is 3 m)
+  min_fraction          A minimum proportion of the bed distribution to assign to each grain size class (default is 0.005
 
 optional arguments:
   -h, --help            show this help message and exit
