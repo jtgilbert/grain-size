@@ -4,8 +4,8 @@ import argparse
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-# import matplotlib.pyplot as plt
 
+from typing import List
 from sklearn.utils import resample
 from scipy import stats
 from scipy.optimize import fmin
@@ -18,7 +18,18 @@ class GrainSize:
     a drainage network using one or more field measurements of grain size distribution
     """
 
-    def __init__(self, network, measurements, reach_ids, da_field, max_size=3, minimum_fraction=0.005):
+    def __init__(self, network: str, measurements: List[str], reach_ids: List[int], da_field: str,
+                 max_size: float = 3.0, minimum_fraction: float = 0.005):
+        """
+
+        :param network: path to stream network feature class
+        :param measurements: path to csv files containing grain size measurements
+        :param reach_ids: list of network reach ids associated with the measurements
+        :param da_field: the name of the drainage area field in the network feature class
+        :param max_size: a maximum size for sediment particles in the basin (default = 3 m)
+        :param minimum_fraction: a minimum fraction to assign to each size class of a grain size distribution
+        (default = 0.005, 0.5%)
+        """
 
         if len(measurements) != len(reach_ids):
             raise Exception('Different number of measurements and associated reach IDs entered')
@@ -65,7 +76,7 @@ class GrainSize:
 
             self.reach_stats[reach_ids[i]] = {
                 'slope': self.dn.loc[reach_ids[i], 'Slope'],
-                'drain_area': self.dn.loc[reach_ids[i], self.da_field],  # might need to change to DivDA
+                'drain_area': self.dn.loc[reach_ids[i], self.da_field],
                 'd16': np.percentile(df['D'], 16),
                 'd16_low': low_d16,
                 'd16_high': high_d16,
@@ -408,7 +419,7 @@ class GrainSize:
 
             k2, pval = stats.normaltest(data)
             if pval < 1e-3:
-                print('p-value: ', pval, ' indicates that the distribution may not be normal')
+                print(f'p-value: {pval} indicates that the transformed distribution may not be normal')
 
             params = stats.norm.fit(data)
             loc = params[0]
@@ -422,14 +433,12 @@ class GrainSize:
 
                 k2, pval = stats.normaltest(data)
                 if pval < 1e-3:
-                    print('p-value: ', pval, ' indicates that the distribution may not be normal')
+                    print(f'p-value: {pval} indicates that the transformed distribution may not be normal')
 
                 params = stats.norm.fit(data)
                 loclist.append(params[0])
                 scalelist.append(params[1])
             loc, scale = np.average(loclist), np.average(scalelist)
-
-            # do i want to produce any plots..?
 
         for i in self.dn.index:
             print(f'finding distribution for segment {i}')
@@ -450,53 +459,55 @@ class GrainSize:
             new_data = new_data[new_data >= 0.0005]
             new_data = new_data[new_data<self.dn.loc[i, 'Dmax']/1000]
 
-            #self.gs[i].update({'Dmax': max(new_data)})
             self.gs[i]['fractions'].update({
-                '0-1': {'fraction': sum(1 for d in new_data if 0 < d <= 0.001) / len(new_data),
-                        'lower': 0,
+                '1': {'fraction': sum(1 for d in new_data if 0.0005 <= d < 0.001) / len(new_data),
+                        'lower': 0.0005,
                         'upper': 0.001},
-                '1-2': {'fraction': sum(1 for d in new_data if 0.001 < d <= 0.002) / len(new_data),
+                '0': {'fraction': sum(1 for d in new_data if 0.001 <= d < 0.002) / len(new_data),
                         'lower': 0.001,
                         'upper': 0.002},
-                '2-4': {'fraction': sum(1 for d in new_data if 0.002 < d <= 0.004) / len(new_data),
+                '-1': {'fraction': sum(1 for d in new_data if 0.002 <= d < 0.004) / len(new_data),
                         'lower': 0.002,
                         'upper': 0.004},
-                '4-8': {'fraction': sum(1 for d in new_data if 0.004 < d <= 0.008) / len(new_data),
+                '-2': {'fraction': sum(1 for d in new_data if 0.004 <= d < 0.0057) / len(new_data),
                         'lower': 0.004,
-                        'upper': 0.008},
-                '8-12': {'fraction': sum(1 for d in new_data if 0.008 < d <= 0.012) / len(new_data),
-                         'lower': 0.008,
-                         'upper': 0.012},
-                '12-16': {'fraction': sum(1 for d in new_data if 0.012 < d <= 0.016) / len(new_data),
-                          'lower': 0.012,
+                        'upper': 0.0057},
+                '-2.5': {'fraction': sum(1 for d in new_data if 0.0057 <= d < 0.008) / len(new_data),
+                         'lower': 0.0057,
+                         'upper': 0.008},
+                '-3': {'fraction': sum(1 for d in new_data if 0.008 <= d < 0.0113) / len(new_data),
+                          'lower': 0.008,
+                          'upper': 0.0113},
+                '-3.5': {'fraction': sum(1 for d in new_data if 0.0113 <= d < 0.016) / len(new_data),
+                          'lower': 0.0113,
                           'upper': 0.016},
-                '16-24': {'fraction': sum(1 for d in new_data if 0.016 < d <= 0.024) / len(new_data),
+                '-4': {'fraction': sum(1 for d in new_data if 0.016 <= d < 0.0226) / len(new_data),
                           'lower': 0.016,
-                          'upper': 0.024},
-                '24-32': {'fraction': sum(1 for d in new_data if 0.024 < d <= 0.032) / len(new_data),
-                          'lower': 0.024,
+                          'upper': 0.0226},
+                '-4.5': {'fraction': sum(1 for d in new_data if 0.0226 <= d < 0.032) / len(new_data),
+                          'lower': 0.0226,
                           'upper': 0.032},
-                '32-48': {'fraction': sum(1 for d in new_data if 0.032 < d <= 0.048) / len(new_data),
+                '-5': {'fraction': sum(1 for d in new_data if 0.032 <= d < 0.045) / len(new_data),
                           'lower': 0.032,
-                          'upper': 0.048},
-                '48-64': {'fraction': sum(1 for d in new_data if 0.048 < d <= 0.064) / len(new_data),
-                          'lower': 0.048,
+                          'upper': 0.045},
+                '-5.5': {'fraction': sum(1 for d in new_data if 0.045 <= d < 0.064) / len(new_data),
+                          'lower': 0.045,
                           'upper': 0.064},
-                '64-96': {'fraction': sum(1 for d in new_data if 0.064 < d <= 0.096) / len(new_data),
-                          'lower': 0.064,
-                          'upper': 0.096},
-                '96-128': {'fraction': sum(1 for d in new_data if 0.096 < d <= 0.128) / len(new_data),
-                           'lower': 0.096,
-                           'upper': 0.128},
-                '128-192': {'fraction': sum(1 for d in new_data if 0.128 < d <= 0.192) / len(new_data),
+                '-6': {'fraction': sum(1 for d in new_data if 0.064 <= d < 0.091) / len(new_data),
+                           'lower': 0.064,
+                           'upper': 0.091},
+                '-6.5': {'fraction': sum(1 for d in new_data if 0.091 <= d < 0.128) / len(new_data),
+                            'lower': 0.091,
+                            'upper': 0.128},
+                '-7': {'fraction': sum(1 for d in new_data if 0.128 <= d < 0.181) / len(new_data),
                             'lower': 0.128,
-                            'upper': 0.192},
-                '192-256': {'fraction': sum(1 for d in new_data if 0.192 < d <= 0.256) / len(new_data),
-                            'lower': 0.192,
-                            'upper': 256},
-                '>256': {'fraction': sum(1 for d in new_data if 0.256 < d) / len(new_data),
-                         'lower': 0.256,
-                         'upper': 512}
+                            'upper': 181},
+                '-7.5': {'fraction': sum(1 for d in new_data if 0.181 <= d < 0.256) / len(new_data),
+                         'lower': 0.181,
+                         'upper': 256},
+                '-8': {'fraction': sum(1 for d in new_data if d >= 0.256) / len(new_data),
+                       'lower': 256,
+                       'upper': self.dn.loc[i, 'Dmax']}
             })
 
 
