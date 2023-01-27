@@ -95,11 +95,12 @@ class GrainSize:
             d16_rat = [stats['d16'] / stats['d50'] for id, stats in self.reach_stats.items()]
             slope = [stats['slope'] for id, stats in self.reach_stats.items()]
             rough_params = np.polyfit(slope, roughness, 1)
-            d16_rat_params = np.polyfit(d16_rat, slope, 1)
+            d16_rat_params = np.polyfit(slope, d16_rat, 1)
             # might need to check that it can't be <0
             self.rough_coef, self.rough_rem = rough_params[0], rough_params[1]
             self.d16_coef, self.d16_rem = d16_rat_params[0], d16_rat_params[1]
             self.roughness_type = 'function'
+
         else:
             self.roughness = self.reach_stats[self.reach_ids[0]]['d84']/self.reach_stats[self.reach_ids[0]]['d50']
             self.d16_rat = self.reach_stats[self.reach_ids[0]]['d16']/self.reach_stats[self.reach_ids[0]]['d50']
@@ -224,14 +225,22 @@ class GrainSize:
                 coefs['84']['high'].append(vals['h_coef_84_high'])
                 coefs['84']['slope'].append(vals['slope'])
 
+            min_slope = self.dn['Slope'].min()
+            coefs_max = 0
+            for i, vals in coefs.items():
+                for key in vals.keys():
+                    if key != 'slope':
+                        if max(vals[key]) > coefs_max:
+                            coefs_max = max(vals[key])
+
             for i, vals in coefs.items():
                 for key in vals.keys():
                     if key == 'slope':
-                        vals[key].append(0.0001)
+                        vals[key].append(min_slope)
                     else:
-                        vals[key].append(0.05)
+                        vals[key].append(coefs_max + 0.01)
 
-            #logvals = np.log(coefs['16']['slope'])
+            logvals = np.log(coefs['16']['slope'])
 
             low_16_a, low_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['low']), 1)
             mid_16_a, mid_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['mid']), 1)
@@ -545,4 +554,4 @@ def main():
 if __name__ == '__main__':
     main()
 
-# GrainSize(network='../Input_data/Roaring_Lion_custom.shp', measurements=['../Input_data/RL_avalanche_D.csv', '../Input_data/RL_xing_D.csv'], da_field='Drain_Area', reach_ids=[118, 149])
+# GrainSize(network='../Input_data/Blodgett_custom.shp', measurements=['../Input_data/Blodgett_D.csv', '../Input_data/Blodgett_talus_D.csv'], da_field='Drain_Area', reach_ids=[118, 95])
