@@ -19,7 +19,7 @@ class GrainSize:
     """
 
     def __init__(self, network: str, measurements, reach_ids, da_field: str,
-                 max_size: float = 3.0, minimum_sand: float = 0.01):
+                 max_size: float = 3.0, minimum_fraction: float = None):
         """
 
         :param network: path to stream network feature class
@@ -39,7 +39,7 @@ class GrainSize:
         self.reach_ids = reach_ids
         self.da_field = da_field
         self.max_size = max_size
-        self.minimum_sand = minimum_sand
+        self.minimum_frac = minimum_fraction
         self.dn = gpd.read_file(network)
 
         # check for drainage area field and slope field in input network
@@ -504,10 +504,35 @@ class GrainSize:
                 '-8.5': {'fraction': sum(1 for d in new_data if 8.5 <= d < 9) / len(new_data),
                        'lower': 362,
                        'upper': 512},
-                '9': {'fraction': sum(1 for d in new_data if d >= 9) / len(new_data),
+                '-9': {'fraction': sum(1 for d in new_data if d >= 9) / len(new_data),
                       'lower': 512,
                       'upper': self.dn.loc[i, 'Dmax']}
             })
+
+            # enforce minimum fraction
+            if self.minimum_frac:
+                counter = 0
+                tot_added = 0
+                ex_vals = [v['fraction'] for p, v in self.gs[i]['fractions'].items()]
+                ex_vals.sort()
+                for phi, vals in self.gs[i]['fractions'].items():
+                    if float(phi) > -4 and vals['fraction'] < self.minimum_frac:
+                        counter += 1
+                        add = self.minimum_frac - vals['fraction']
+                        tot_added += add
+                        self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                    if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
+                        counter += 1
+                        add = self.minimum_frac - vals['fractions']
+                        tot_added += add
+                        self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                if counter > 0:
+                    subtract = tot_added / counter
+                    vals_to_subtr = ex_vals[-counter:]
+                    for phi, vals in self.gs[i]['fractions'].items():
+                        if vals['fraction'] in vals_to_subtr:
+                            self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
+
 
             print(f'segment {i} D50: {2**np.percentile(new_data, 50)}')
             print(f'segment {i} D84: {2**np.percentile(new_data, 84)}')
@@ -547,4 +572,4 @@ def main():
 # if __name__ == '__main__':
 #     main()
 
-GrainSize(network='../Input_data/Woods_custom.shp', measurements=['../Input_data/Woods_D.csv'], da_field='Drain_Area', reach_ids=[24])
+GrainSize(network='../Input_data/Woods_custom.shp', measurements=['../Input_data/woods_generated2.csv'], da_field='Drain_Area', reach_ids=[24], minimum_fraction=0.005)
