@@ -523,7 +523,7 @@ class GrainSize:
                         self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
                     if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
                         counter += 1
-                        add = self.minimum_frac - vals['fractions']
+                        add = self.minimum_frac - vals['fraction']
                         tot_added += add
                         self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
                 if counter > 0:
@@ -572,4 +572,4 @@ def main():
 # if __name__ == '__main__':
 #     main()
 
-GrainSize(network='../Input_data/Woods_custom.shp', measurements=['../Input_data/woods_generated2.csv'], da_field='Drain_Area', reach_ids=[24], minimum_fraction=0.005)
+GrainSize(network='../Input_data/Woods_network_100m.shp', measurements=['../Input_data/woods_generated2.csv'], da_field='Drain_Area', reach_ids=[51], minimum_fraction=0.005)
