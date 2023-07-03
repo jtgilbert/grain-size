@@ -7,6 +7,7 @@ import pandas as pd
 
 from typing import List
 from sklearn.utils import resample
+from sklearn.linear_model import LinearRegression
 from scipy import stats
 from scipy.optimize import fmin
 
@@ -93,29 +94,30 @@ class GrainSize:
         if len(self.reach_stats) > 1:
             roughness = [stats['d84'] / stats['d50'] for id, stats in self.reach_stats.items()]
             d16_rat = [stats['d16'] / stats['d50'] for id, stats in self.reach_stats.items()]
-            slope = [stats['slope'] for id, stats in self.reach_stats.items()]
-            rough_params = np.polyfit(slope, roughness, 1)
-            d16_rat_params = np.polyfit(slope, d16_rat, 1)
+            maxvals = [atts['dmax'] for _, atts in self.reach_stats.items()]
+            maxd84s = [atts['d84'] for _, atts in self.reach_stats.items()]
+            inputs = [[stats['slope'], stats['drain_area']] for id, stats in self.reach_stats.items()]
+
+            rough_mod = LinearRegression()
+            d16_rat_mod = LinearRegression()
+            dmax_mod = LinearRegression()
+            rough_mod.fit(inputs, roughness)
+            d16_rat_mod.fit(inputs, d16_rat)
+            dmax_mod.fit(inputs, maxvals)
+            self.rough_intercept, self.rough_coef = rough_mod.intercept_, rough_mod.coef_
+            self.d16_rat_intercept, self.d16_rat_coefs = d16_rat_mod.intercept_, d16_rat_mod.coef_
+            self.dmax_intercept, self.dmax_coefs = dmax_mod.intercept_, dmax_mod.coef_
+            self.dmax_ratio = np.average([maxvals[i] / maxd84s[i] for i in range(len(maxvals))])
+
             # might need to check that it can't be <0
-            self.rough_coef, self.rough_rem = rough_params[0], rough_params[1]
-            self.d16_coef, self.d16_rem = d16_rat_params[0], d16_rat_params[1]
             self.roughness_type = 'function'
 
         else:
             self.roughness = self.reach_stats[self.reach_ids[0]]['d84']/self.reach_stats[self.reach_ids[0]]['d50']
             self.d16_rat = self.reach_stats[self.reach_ids[0]]['d16']/self.reach_stats[self.reach_ids[0]]['d50']
-            self.roughness_type = 'value'
-
-        # get dmax params or scalar
-        if len(self.reach_stats) > 1:
-            maxvals = [atts['dmax'] for _, atts in self.reach_stats.items()]
-            maxd84s = [atts['d84'] for _, atts in self.reach_stats.items()]
-            slopevals = [atts['slope'] for _, atts in self.reach_stats.items()]
-            self.dmax_params = np.polyfit(slopevals, maxvals, 1)
-            self.dmax_ratio = np.average([maxvals[i]/maxd84s[i] for i in range(len(maxvals))])
-        else:
-            self.dmax_params = [atts['dmax']/atts['d84'] for _, atts in self.reach_stats.items()]
+            self.dmax_params = [atts['dmax'] / atts['d84'] for _, atts in self.reach_stats.items()]
             self.dmax_ratio = self.dmax_params[0]
+            self.roughness_type = 'value'
 
         self.find_crit_depth()
         self.get_hydraulic_geom_coef()
@@ -132,11 +134,11 @@ class GrainSize:
         for reachid, vals in self.reach_stats.items():
             roughness = vals['d84'] / vals['d50']
             if roughness <= 2:
-                tau_coef = 0.025
-            elif 2 < roughness < 3.5:
-                tau_coef = 0.087 * np.log(roughness) - 0.034
+                tau_coef = 0.029
             else:
-                tau_coef = 0.073
+                tau_coef = 0.043 * np.log(roughness) - 0.0005
+            if tau_coef < 0.029:
+                tau_coef = 0.029
             tau_c_star_16 = tau_coef * (vals['d16'] / vals['d50']) ** -0.68
             tau_c_16 = tau_c_star_16 * (rho_s - rho) * 9.81 * vals['d16']
             h_c_16 = tau_c_16 / (rho * 9.81 * vals['slope'])
@@ -282,6 +284,8 @@ class GrainSize:
                 tau_coef = 0.029
             else:
                 tau_coef = 0.043 * np.log(rough) - 0.0005
+            if tau_coef < 0.029:
+                tau_coef = 0.029
 
             if d16_rat < 0.1:
                 d16_rat = 0.1  # this is kind of janky to just set a fixed value...
@@ -572,4 +576,4 @@ def main():
 # if __name__ == '__main__':
 #     main()
 
-GrainSize(network='../Input_data/Woods_network_100m.shp', measurements=['../Input_data/woods_generated2.csv'], da_field='Drain_Area', reach_ids=[51], minimum_fraction=0.005)
+GrainSize(network='../Input_data/Roaring_Lion_custom.shp', measurements=['../Input_data/RL_avalanche_D.csv', '../Input_data/RL_xing_D.csv'], da_field='Drain_Area', reach_ids=[118, 149], minimum_fraction=0.005)
