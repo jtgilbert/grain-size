@@ -18,8 +18,8 @@ class GrainSize:
     a drainage network using one or more field measurements of grain size distribution
     """
 
-    def __init__(self, network: str, measurements: List[str], reach_ids: List[int], da_field: str,
-                 max_size: float = 3.0, minimum_fraction: float = 0.005):
+    def __init__(self, network: str, measurements, reach_ids, da_field: str,
+                 max_size: float = 3.0, minimum_fraction: float = None):
         """
 
         :param network: path to stream network feature class
@@ -95,11 +95,12 @@ class GrainSize:
             d16_rat = [stats['d16'] / stats['d50'] for id, stats in self.reach_stats.items()]
             slope = [stats['slope'] for id, stats in self.reach_stats.items()]
             rough_params = np.polyfit(slope, roughness, 1)
-            d16_rat_params = np.polyfit(d16_rat, slope, 1)
+            d16_rat_params = np.polyfit(slope, d16_rat, 1)
             # might need to check that it can't be <0
             self.rough_coef, self.rough_rem = rough_params[0], rough_params[1]
             self.d16_coef, self.d16_rem = d16_rat_params[0], d16_rat_params[1]
             self.roughness_type = 'function'
+
         else:
             self.roughness = self.reach_stats[self.reach_ids[0]]['d84']/self.reach_stats[self.reach_ids[0]]['d50']
             self.d16_rat = self.reach_stats[self.reach_ids[0]]['d16']/self.reach_stats[self.reach_ids[0]]['d50']
@@ -224,14 +225,22 @@ class GrainSize:
                 coefs['84']['high'].append(vals['h_coef_84_high'])
                 coefs['84']['slope'].append(vals['slope'])
 
+            min_slope = self.dn['Slope'].min()
+            coefs_max = 0
+            for i, vals in coefs.items():
+                for key in vals.keys():
+                    if key != 'slope':
+                        if max(vals[key]) > coefs_max:
+                            coefs_max = max(vals[key])
+
             for i, vals in coefs.items():
                 for key in vals.keys():
                     if key == 'slope':
-                        vals[key].append(0.0001)
+                        vals[key].append(min_slope)
                     else:
-                        vals[key].append(0.05)
+                        vals[key].append(coefs_max + 0.01)
 
-            #logvals = np.log(coefs['16']['slope'])
+            logvals = np.log(coefs['16']['slope'])
 
             low_16_a, low_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['low']), 1)
             mid_16_a, mid_16_b = np.polyfit(np.log(coefs['16']['slope']), np.log(coefs['16']['mid']), 1)
@@ -270,11 +279,10 @@ class GrainSize:
                 rough = self.roughness
                 d16_rat = self.d16_rat
             if rough <= 2:
-                tau_coef = 0.025
-            elif 2 < rough < 3.5:
-                tau_coef = 0.087 * np.log(rough) - 0.034
+                tau_coef = 0.029
             else:
-                tau_coef = 0.073
+                tau_coef = 0.043 * np.log(rough) - 0.0005
+
             if d16_rat < 0.1:
                 d16_rat = 0.1  # this is kind of janky to just set a fixed value...
 
@@ -394,121 +402,140 @@ class GrainSize:
 
     def grain_size_distributions(self):
 
-        def med_err(loc, scale, med_obs):
-            dist = stats.norm(loc, scale).rvs(10000)
-            dist = dist**2
-            dist = dist[dist > 0.0005]  # gets rid of sub-zero values (makes it sand and greater)
-            med_est = np.percentile(dist, 50)
-            err = (med_obs - med_est) ** 2
+        def loc_err(loc, a, scale, d50):
+            dist = stats.skewnorm(a, loc, scale).rvs(10000)
+            d50_est = np.percentile(dist, 50)
+            err = (np.log2(d50) - d50_est) ** 2
 
             return err
 
-        def std_err(scale, loc, d16, d84):
-            if scale < 0.05:
-                scale = 0.05
-            dist = stats.norm(loc, scale).rvs(10000)
-            dist = dist**2
-            dist = dist[dist > 0.0005]
-            err = (np.percentile(dist, 16) - d16) ** 2 + (np.percentile(dist, 84) - d84) ** 2
+        def scale_err(scale, a, loc, d16, d84):
+            if scale <= 0:
+                scale = abs(scale)
+            dist = stats.skewnorm(a, loc, scale).rvs(10000)
+            err = (np.percentile(dist, 16) - np.log2(d16)) ** 2 + (np.percentile(dist, 84) - np.log2(d84)) ** 2
 
             return err
 
         if len(self.measurements) == 1:
             data = pd.read_csv(self.measurements[0])
-            data = np.sqrt(data['D'] / 1000)
+            data = [np.log2(i) for i in list(data['D'])]
 
-            k2, pval = stats.normaltest(data)
-            if pval < 1e-3:
-                print(f'p-value: {pval} indicates that the transformed distribution may not be normal')
-
-            params = stats.norm.fit(data)
-            loc = params[0]
-            scale = params[1]
+            params = stats.skewnorm.fit(data)
+            a, loc, scale = params[0], params[1], params[2]
 
         else:  # for now just take average...could maybe make function of slope too
-            loclist, scalelist = [], []
+            alist, loclist, scalelist = [], [], []
             for i, meas in enumerate(self.measurements):
                 data = pd.read_csv(meas)
-                data = np.sqrt(data['D'] / 1000)
+                data = [np.log2(i) for i in list(data['D'])]
 
-                k2, pval = stats.normaltest(data)
-                if pval < 1e-3:
-                    print(f'p-value: {pval} indicates that the transformed distribution may not be normal')
-
-                params = stats.norm.fit(data)
-                loclist.append(params[0])
-                scalelist.append(params[1])
-            loc, scale = np.average(loclist), np.average(scalelist)
+                params = stats.skewnorm.fit(data)
+                alist.append(params[0])
+                loclist.append(params[1])
+                scalelist.append(params[2])
+            a, loc, scale = np.average(alist), np.average(loclist), np.average(scalelist)
 
         for i in self.dn.index:
             print(f'finding distribution for segment {i}')
-            d_50, d_16, d_84 = (self.dn.loc[i, 'D50'] / 1000), (self.dn.loc[i, 'D16'] / 1000), (
-                        self.dn.loc[i, 'D84'] / 1000)
+            d_50, d_16, d_84 = self.dn.loc[i, 'D50'], self.dn.loc[i, 'D16'], self.dn.loc[i, 'D84']
 
-            res = fmin(med_err, loc, args=(scale, d_50))
+            res = fmin(loc_err, loc, args=(a, scale, d_50))
             loc_opt = res[0]
 
-            res2 = fmin(std_err, scale, args=(loc_opt, d_16, d_84))
+            res2 = fmin(scale_err, scale, args=(a, loc_opt, d_16, d_84))
             scale_opt = res2[0]
-            while scale_opt <= 0:
-               res2 = fmin(std_err, abs(scale_opt), args=(loc_opt, d_16, d_84))
-               scale_opt = res2[0]
+            # while scale_opt <= 0:
+            #    res2 = fmin(scale_err, abs(scale_opt), args=(a, loc_opt, d_50))
+            #    scale_opt = res2[0]
 
-            new_data = stats.norm(loc_opt, scale_opt).rvs(10000)
-            new_data = new_data**2
-            new_data = new_data[new_data >= 0.0005]
-            new_data = new_data[new_data<self.dn.loc[i, 'Dmax']/1000]
+            new_data = stats.skewnorm(a, loc_opt, scale_opt).rvs(10000)
+            new_data = new_data[new_data>=-1]
 
             self.gs[i]['fractions'].update({
-                '1': {'fraction': sum(1 for d in new_data if 0.0005 <= d < 0.001) / len(new_data),
+                '1': {'fraction': sum(1 for d in new_data if -1 <= d < 0) / len(new_data),
                         'lower': 0.0005,
                         'upper': 0.001},
-                '0': {'fraction': sum(1 for d in new_data if 0.001 <= d < 0.002) / len(new_data),
+                '0': {'fraction': sum(1 for d in new_data if 0 <= d < 1) / len(new_data),
                         'lower': 0.001,
                         'upper': 0.002},
-                '-1': {'fraction': sum(1 for d in new_data if 0.002 <= d < 0.004) / len(new_data),
+                '-1': {'fraction': sum(1 for d in new_data if 1 <= d < 2) / len(new_data),
                         'lower': 0.002,
                         'upper': 0.004},
-                '-2': {'fraction': sum(1 for d in new_data if 0.004 <= d < 0.0057) / len(new_data),
+                '-2': {'fraction': sum(1 for d in new_data if 2 <= d < 2.5) / len(new_data),
                         'lower': 0.004,
                         'upper': 0.0057},
-                '-2.5': {'fraction': sum(1 for d in new_data if 0.0057 <= d < 0.008) / len(new_data),
+                '-2.5': {'fraction': sum(1 for d in new_data if 2.5 <= d < 3) / len(new_data),
                          'lower': 0.0057,
                          'upper': 0.008},
-                '-3': {'fraction': sum(1 for d in new_data if 0.008 <= d < 0.0113) / len(new_data),
+                '-3': {'fraction': sum(1 for d in new_data if 3 <= d < 3.5) / len(new_data),
                           'lower': 0.008,
                           'upper': 0.0113},
-                '-3.5': {'fraction': sum(1 for d in new_data if 0.0113 <= d < 0.016) / len(new_data),
+                '-3.5': {'fraction': sum(1 for d in new_data if 3.5 <= d < 4) / len(new_data),
                           'lower': 0.0113,
                           'upper': 0.016},
-                '-4': {'fraction': sum(1 for d in new_data if 0.016 <= d < 0.0226) / len(new_data),
+                '-4': {'fraction': sum(1 for d in new_data if 4 <= d < 4.5) / len(new_data),
                           'lower': 0.016,
                           'upper': 0.0226},
-                '-4.5': {'fraction': sum(1 for d in new_data if 0.0226 <= d < 0.032) / len(new_data),
+                '-4.5': {'fraction': sum(1 for d in new_data if 4.5 <= d < 5) / len(new_data),
                           'lower': 0.0226,
                           'upper': 0.032},
-                '-5': {'fraction': sum(1 for d in new_data if 0.032 <= d < 0.045) / len(new_data),
+                '-5': {'fraction': sum(1 for d in new_data if 5 <= d < 5.5) / len(new_data),
                           'lower': 0.032,
                           'upper': 0.045},
-                '-5.5': {'fraction': sum(1 for d in new_data if 0.045 <= d < 0.064) / len(new_data),
+                '-5.5': {'fraction': sum(1 for d in new_data if 5.5 <= d < 6) / len(new_data),
                           'lower': 0.045,
                           'upper': 0.064},
-                '-6': {'fraction': sum(1 for d in new_data if 0.064 <= d < 0.091) / len(new_data),
+                '-6': {'fraction': sum(1 for d in new_data if 6 <= d < 6.5) / len(new_data),
                            'lower': 0.064,
                            'upper': 0.091},
-                '-6.5': {'fraction': sum(1 for d in new_data if 0.091 <= d < 0.128) / len(new_data),
+                '-6.5': {'fraction': sum(1 for d in new_data if 6.5 <= d < 7) / len(new_data),
                             'lower': 0.091,
                             'upper': 0.128},
-                '-7': {'fraction': sum(1 for d in new_data if 0.128 <= d < 0.181) / len(new_data),
+                '-7': {'fraction': sum(1 for d in new_data if 7 <= d < 7.5) / len(new_data),
                             'lower': 0.128,
                             'upper': 181},
-                '-7.5': {'fraction': sum(1 for d in new_data if 0.181 <= d < 0.256) / len(new_data),
+                '-7.5': {'fraction': sum(1 for d in new_data if 7.5 <= d < 8) / len(new_data),
                          'lower': 0.181,
                          'upper': 256},
-                '-8': {'fraction': sum(1 for d in new_data if d >= 0.256) / len(new_data),
+                '-8': {'fraction': sum(1 for d in new_data if 8 <= d < 8.5) / len(new_data),
                        'lower': 256,
-                       'upper': self.dn.loc[i, 'Dmax']}
+                       'upper': 362},
+                '-8.5': {'fraction': sum(1 for d in new_data if 8.5 <= d < 9) / len(new_data),
+                       'lower': 362,
+                       'upper': 512},
+                '-9': {'fraction': sum(1 for d in new_data if d >= 9) / len(new_data),
+                      'lower': 512,
+                      'upper': self.dn.loc[i, 'Dmax']}
             })
+
+            # enforce minimum fraction
+            if self.minimum_frac:
+                counter = 0
+                tot_added = 0
+                ex_vals = [v['fraction'] for p, v in self.gs[i]['fractions'].items()]
+                ex_vals.sort()
+                for phi, vals in self.gs[i]['fractions'].items():
+                    if float(phi) > -4 and vals['fraction'] < self.minimum_frac:
+                        counter += 1
+                        add = self.minimum_frac - vals['fraction']
+                        tot_added += add
+                        self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                    if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
+                        counter += 1
+                        add = self.minimum_frac - vals['fraction']
+                        tot_added += add
+                        self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                if counter > 0:
+                    subtract = tot_added / counter
+                    vals_to_subtr = ex_vals[-counter:]
+                    for phi, vals in self.gs[i]['fractions'].items():
+                        if vals['fraction'] in vals_to_subtr:
+                            self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
+
+
+            print(f'segment {i} D50: {2**np.percentile(new_data, 50)}')
+            print(f'segment {i} D84: {2**np.percentile(new_data, 84)}')
 
 
     def save_network(self):
@@ -534,15 +561,15 @@ def main():
                                          'upstream contributing drainage area', type=str, required=True)
     parser.add_argument('--max_size', help='A maximum grain size for all reaches in meters (default is 3 m)',
                         type=float, required=True, default=3)
-    parser.add_argument('--min_fraction', help='A minimum proportion of the bed distribution to assign to each grain '
-                                             'size class (default is 0.005', type=float, required=True, default=0.005)
+    parser.add_argument('--min_sand', help='A minimum proportion of the bed distribution to assign to sand '
+                                             'size classes (default is 0.01', type=float, required=True, default=0.01)
 
     args = parser.parse_args()
 
-    GrainSize(args.stream_network, args.measurements, args.reach_ids, args.da_field, args.max_size, args.min_fraction)
+    GrainSize(args.stream_network, args.measurements, args.reach_ids, args.da_field, args.max_size, args.min_sand)
 
 
-if __name__ == '__main__':
-    main()
+# if __name__ == '__main__':
+#     main()
 
-# GrainSize(network='../Input_data/Roaring_Lion_custom.shp', measurements=['../Input_data/RL_avalanche_D.csv', '../Input_data/RL_xing_D.csv'], da_field='Drain_Area', reach_ids=[118, 149])
+GrainSize(network='../Input_data/Woods_network_100m.shp', measurements=['../Input_data/woods_generated2.csv'], da_field='Drain_Area', reach_ids=[51], minimum_fraction=0.005)
