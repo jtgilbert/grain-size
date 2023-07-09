@@ -97,6 +97,9 @@ class GrainSize:
             maxvals = [atts['dmax'] for _, atts in self.reach_stats.items()]
             maxd84s = [atts['d84'] for _, atts in self.reach_stats.items()]
             inputs = [[stats['slope'], stats['drain_area']] for id, stats in self.reach_stats.items()]
+            # in these cases drainage area should actually be a cumulative precip normalized drainage area...
+            # that is, total precip in contributing basin / DA
+            # modify existing flow factor code to accomplish this (network-attributes)
 
             rough_mod = LinearRegression()
             d16_rat_mod = LinearRegression()
