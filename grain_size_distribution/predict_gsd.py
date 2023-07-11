@@ -13,9 +13,9 @@ from sklearn.linear_model import LinearRegression
 
 
 class GrainSize:
-
-    def __int__(self, measurements, slopes, precip_da, network: str, slope_field: str, precip_da_field: str,
+    def __init__(self, measurements, slopes, precip_da, network: str, slope_field: str, precip_da_field: str,
                 minimum_frac: float = None):
+
         self.measurements = measurements
         self.slopes = slopes
         self.precip_da = precip_da
@@ -37,18 +37,18 @@ class GrainSize:
 
         if len(self.measurements) > 1:
             params = self.calibration()
-            self.gs = self.attribute_network(params)
-            self.generate_gsd()
+            gs_dict = self.attribute_network(params)
+            gsd_out = self.generate_gsd(gs_dict=gs_dict)
             self.save_network()
-            self.save_grain_size_dict()
+            self.save_grain_size_dict(gsd_out)
         else:
             self.one_meas_stats()
             self.find_crit_depth()
             self.get_hydraulic_geom_coef()
-            self.gs = self.attribute_network_one_meas()
-            self.generate_gsd()
+            gs_dict = self.attribute_network_one_meas()
+            gsd_out = self.generate_gsd(gs_dict=gs_dict)
             self.save_network()
-            self.save_grain_size_dict()
+            self.save_grain_size_dict(gsd_out)
 
     def calibration(self):
         calibration_stats = {'d50': {'low': [], 'mid': [], 'high':[]},
@@ -59,12 +59,13 @@ class GrainSize:
 
         for i, meas in enumerate(self.measurements):
             df = pd.read_csv(meas)
-            data = [np.log2(i / 1000) for i in list(df['D'])]
+            data = [np.log2(i) for i in list(df['D'])]
             a, loc, scale = stats.skewnorm.fit(data)
 
             # generate gsd to fill out distribution
             gsd = stats.skewnorm(a, loc, scale).rvs(1000)
             d50, d16, d84 = np.median(gsd), np.percentile(gsd, 16), np.percentile(gsd, 84)
+            logging.info(f'{meas} stats -- D50: {int(2 ** d50)}, D16: {int(2 ** d16)}, D84: {int(2 ** d84)}')
             calibration_stats['d50']['mid'].append(d50)
             calibration_stats['d16']['mid'].append(d16)
             calibration_stats['d84']['mid'].append(d84)
@@ -94,51 +95,70 @@ class GrainSize:
             calibration_stats['d84']['low'].append(low_d84)
             calibration_stats['d84']['high'].append(high_d84)
 
+        # check fit of linear vs log model
+        lin_inputs = np.array([self.slopes[i] * self.precip_da[i] for i, s_val in enumerate(self.slopes)]).reshape(-1,1)
+        log_inputs = np.array([np.log(self.slopes[i] * self.precip_da[i]) for i, s_val in enumerate(self.slopes)]).reshape(-1,1)
+        lin_mod = LinearRegression()
+        lin_mod.fit(lin_inputs, calibration_stats['d50']['mid'])
+        lin_r2 = lin_mod.score(lin_inputs, calibration_stats['d50']['mid'])
+        logging.info(f'Linear model r2: {lin_r2}')
+        log_mod = LinearRegression()
+        log_mod.fit(log_inputs, calibration_stats['d50']['mid'])
+        log_r2 = log_mod.score(log_inputs, calibration_stats['d50']['mid'])
+        logging.info(f'Log model r2: {log_r2}')
+        if lin_r2 > log_r2:
+            inputs = lin_inputs
+            parameters_out['model_type'] = 'linear'
+        else:
+            inputs = log_inputs
+            parameters_out['model_type'] = 'log'
+
         # get model parameters
         d50_mid_mod = LinearRegression()
-        d50_mid_mod.fit([self.slopes, self.precip_da], calibration_stats['d50']['mid'])
+        d50_mid_mod.fit(inputs, calibration_stats['d50']['mid'])
         parameters_out['d50_mid'] = {'coefs': d50_mid_mod.coef_, 'intercept': d50_mid_mod.intercept_}
-        logging.info(f'D50 mid regression fit: {d50_mid_mod.score([self.slopes, self.precip_da], calibration_stats["d50"]["mid"])}')
+        logging.info(f'D50 mid regression fit: {d50_mid_mod.score(inputs, calibration_stats["d50"]["mid"])}')
+        print(f'D50 mid regression fit: {d50_mid_mod.score(inputs, calibration_stats["d50"]["mid"])}')
         d50_low_mod = LinearRegression()
-        d50_low_mod.fit([self.slopes, self.precip_da], calibration_stats['d50']['low'])
+        d50_low_mod.fit(inputs, calibration_stats['d50']['low'])
         parameters_out['d50_low'] = {'coefs': d50_low_mod.coef_, 'intercept': d50_low_mod.intercept_}
-        logging.info(f'D50 low regression fit: {d50_low_mod.score([self.slopes, self.precip_da], calibration_stats["d50"]["low"])}')
+        logging.info(f'D50 low regression fit: {d50_low_mod.score(inputs, calibration_stats["d50"]["low"])}')
         d50_high_mod = LinearRegression()
-        d50_high_mod.fit([self.slopes, self.precip_da], calibration_stats['d50']['high'])
+        d50_high_mod.fit(inputs, calibration_stats['d50']['high'])
         parameters_out['d50_high'] = {'coefs': d50_high_mod.coef_, 'intercept': d50_high_mod.intercept_}
-        logging.info(f'D50 high regression fit: {d50_high_mod.score([self.slopes, self.precip_da], calibration_stats["d50"]["high"])}')
+        logging.info(f'D50 high regression fit: {d50_high_mod.score(inputs, calibration_stats["d50"]["high"])}')
 
         d16_mid_mod = LinearRegression()
-        d16_mid_mod.fit([self.slopes, self.precip_da], calibration_stats['d16']['mid'])
+        d16_mid_mod.fit(inputs, calibration_stats['d16']['mid'])
         parameters_out['d16_mid'] = {'coefs': d16_mid_mod.coef_, 'intercept': d16_mid_mod.intercept_}
         logging.info(
-            f'D16 mid regression fit: {d16_mid_mod.score([self.slopes, self.precip_da], calibration_stats["d16"]["mid"])}')
+            f'D16 mid regression fit: {d16_mid_mod.score(inputs, calibration_stats["d16"]["mid"])}')
         d16_low_mod = LinearRegression()
-        d16_low_mod.fit([self.slopes, self.precip_da], calibration_stats['d16']['low'])
+        d16_low_mod.fit(inputs, calibration_stats['d16']['low'])
         parameters_out['d16_low'] = {'coefs': d16_low_mod.coef_, 'intercept': d16_low_mod.intercept_}
         logging.info(
-            f'D16 low regression fit: {d16_low_mod.score([self.slopes, self.precip_da], calibration_stats["d16"]["low"])}')
+            f'D16 low regression fit: {d16_low_mod.score(inputs, calibration_stats["d16"]["low"])}')
         d16_high_mod = LinearRegression()
-        d16_high_mod.fit([self.slopes, self.precip_da], calibration_stats['d16']['high'])
+        d16_high_mod.fit(inputs, calibration_stats['d16']['high'])
         parameters_out['d16_high'] = {'coefs': d16_high_mod.coef_, 'intercept': d16_high_mod.intercept_}
         logging.info(
-            f'D16 high regression fit: {d16_high_mod.score([self.slopes, self.precip_da], calibration_stats["d16"]["high"])}')
+            f'D16 high regression fit: {d16_high_mod.score(inputs, calibration_stats["d16"]["high"])}')
 
         d84_mid_mod = LinearRegression()
-        d84_mid_mod.fit([self.slopes, self.precip_da], calibration_stats['d84']['mid'])
+        d84_mid_mod.fit(inputs, calibration_stats['d84']['mid'])
         parameters_out['d84_mid'] = {'coefs': d84_mid_mod.coef_, 'intercept': d84_mid_mod.intercept_}
         logging.info(
-            f'D84 mid regression fit: {d84_mid_mod.score([self.slopes, self.precip_da], calibration_stats["d84"]["mid"])}')
+            f'D84 mid regression fit: {d84_mid_mod.score(inputs, calibration_stats["d84"]["mid"])}')
         d84_low_mod = LinearRegression()
-        d84_low_mod.fit([self.slopes, self.precip_da], calibration_stats['d84']['low'])
+        d84_low_mod.fit(inputs, calibration_stats['d84']['low'])
         parameters_out['d84_low'] = {'coefs': d84_low_mod.coef_, 'intercept': d84_low_mod.intercept_}
         logging.info(
-            f'D84 low regression fit: {d84_low_mod.score([self.slopes, self.precip_da], calibration_stats["d84"]["low"])}')
+            f'D84 low regression fit: {d84_low_mod.score(inputs, calibration_stats["d84"]["low"])}')
         d84_high_mod = LinearRegression()
-        d84_high_mod.fit([self.slopes, self.precip_da], calibration_stats['d84']['high'])
+        d84_high_mod.fit(inputs, calibration_stats['d84']['high'])
         parameters_out['d84_high'] = {'coefs': d84_high_mod.coef_, 'intercept': d84_high_mod.intercept_}
         logging.info(
-            f'D84 high regression fit: {d84_high_mod.score([self.slopes, self.precip_da], calibration_stats["d84"]["high"])}')
+            f'D84 high regression fit: {d84_high_mod.score(inputs, calibration_stats["d84"]["high"])}')
 
         return parameters_out
 
@@ -147,71 +167,73 @@ class GrainSize:
         stats_dict = {}
 
         for i in self.network.index:
-            d50 = 2 ** (self.network.loc[i, self.slope_field] *
-                                         regression_params['d50_mid']['coefs'][0] +
-                                         self.network.loc[i, self.precip_da_field] *
-                                         regression_params['d50_mid']['coefs'][1] +
-                                         regression_params['d50_mid']['intercept']) * 1000
-            self.network.loc[i, 'D50'] = d50
-            d50_low = 2 ** (self.network.loc[i, self.slope_field] *
-                                         regression_params['d50_low']['coefs'][0] +
-                                         self.network.loc[i, self.precip_da_field] *
-                                         regression_params['d50_low']['coefs'][1] +
-                                         regression_params['d50_low']['intercept']) * 1000
-            self.network.loc[i, 'D50_low'] = d50_low
-            d50_high = 2 ** (self.network.loc[i, self.slope_field] *
-                                         regression_params['d50_high']['coefs'][0] +
-                                         self.network.loc[i, self.precip_da_field] *
-                                         regression_params['d50_high']['coefs'][1] +
-                                         regression_params['d50_high']['intercept']) * 1000
-            self.network.loc[i, 'D50_high'] = d50_high
-            d16 = 2 ** (self.network.loc[i, self.slope_field] *
-                                         regression_params['d16_mid']['coefs'][0] +
-                                         self.network.loc[i, self.precip_da_field] *
-                                         regression_params['d16_mid']['coefs'][1] +
-                                         regression_params['d16_mid']['intercept']) * 1000
-            self.network.loc[i, 'D16'] = d16
-            d16_low = 2 ** (self.network.loc[i, self.slope_field] *
-                                             regression_params['d16_low']['coefs'][0] +
-                                             self.network.loc[i, self.precip_da_field] *
-                                             regression_params['d16_low']['coefs'][1] +
-                                             regression_params['d16_low']['intercept']) * 1000
-            self.network.loc[i, 'D16_low'] = d16_low
-            d16_high = 2 ** (self.network.loc[i, self.slope_field] *
-                                              regression_params['d16_high']['coefs'][0] +
-                                              self.network.loc[i, self.precip_da_field] *
-                                              regression_params['d16_high']['coefs'][1] +
-                                              regression_params['d16_high']['intercept']) * 1000
-            self.network.loc[i, 'D16_high'] = d16_high
-            d84 = 2 ** (self.network.loc[i, self.slope_field] *
-                                         regression_params['d84_mid']['coefs'][0] +
-                                         self.network.loc[i, self.precip_da_field] *
-                                         regression_params['d84_mid']['coefs'][1] +
-                                         regression_params['d84_mid']['intercept']) * 1000
-            self.network.loc[i, 'D84'] = d84
-            d84_low = 2 ** (self.network.loc[i, self.slope_field] *
-                                             regression_params['d84_low']['coefs'][0] +
-                                             self.network.loc[i, self.precip_da_field] *
-                                             regression_params['d84_low']['coefs'][1] +
-                                             regression_params['d84_low']['intercept']) * 1000
-            self.network.loc[i, 'D84_low'] = d84_low
-            d84_high = 2 ** (self.network.loc[i, self.slope_field] *
-                                              regression_params['d84_high']['coefs'][0] +
-                                              self.network.loc[i, self.precip_da_field] *
-                                              regression_params['d84_high']['coefs'][1] +
-                                              regression_params['d84_high']['intercept']) * 1000
-            self.network.loc[i, 'D84_high'] = d84_high
+            if regression_params['model_type'] == 'linear':
+                d50 = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                            regression_params['d50_mid']['coefs'] + regression_params['d50_mid']['intercept'])
+                self.network.loc[i, 'D50'] = d50
+                d50_low = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                regression_params['d50_low']['coefs'] + regression_params['d50_low']['intercept'])
+                self.network.loc[i, 'D50_low'] = d50_low
+                d50_high = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                 regression_params['d50_high']['coefs'] + regression_params['d50_high']['intercept'])
+                self.network.loc[i, 'D50_high'] = d50_high
+                d16 = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                            regression_params['d16_mid']['coefs'] + regression_params['d16_mid']['intercept'])
+                self.network.loc[i, 'D16'] = d16
+                d16_low = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                regression_params['d16_low']['coefs'] + regression_params['d16_low']['intercept'])
+                self.network.loc[i, 'D16_low'] = d16_low
+                d16_high = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                 regression_params['d16_high']['coefs'] + regression_params['d16_high']['intercept'])
+                self.network.loc[i, 'D16_high'] = d16_high
+                d84 = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                            regression_params['d84_mid']['coefs'] + regression_params['d84_mid']['intercept'])
+                self.network.loc[i, 'D84'] = d84
+                d84_low = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                regression_params['d84_low']['coefs'] + regression_params['d84_low']['intercept'])
+                self.network.loc[i, 'D84_low'] = d84_low
+                d84_high = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                 regression_params['d84_high']['coefs'] + regression_params['d84_high']['intercept'])
+                self.network.loc[i, 'D84_high'] = d84_high
+            else:
+                d50 = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                            regression_params['d50_mid']['coefs'] + regression_params['d50_mid']['intercept'])
+                self.network.loc[i, 'D50'] = d50
+                d50_low = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                regression_params['d50_low']['coefs'] + regression_params['d50_low']['intercept'])
+                self.network.loc[i, 'D50_low'] = d50_low
+                d50_high = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                 regression_params['d50_high']['coefs'] + regression_params['d50_high']['intercept'])
+                self.network.loc[i, 'D50_high'] = d50_high
+                d16 = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                            regression_params['d16_mid']['coefs'] + regression_params['d16_mid']['intercept'])
+                self.network.loc[i, 'D16'] = d16
+                d16_low = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                regression_params['d16_low']['coefs'] + regression_params['d16_low']['intercept'])
+                self.network.loc[i, 'D16_low'] = d16_low
+                d16_high = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                 regression_params['d16_high']['coefs'] + regression_params['d16_high']['intercept'])
+                self.network.loc[i, 'D16_high'] = d16_high
+                d84 = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                            regression_params['d84_mid']['coefs'] + regression_params['d84_mid']['intercept'])
+                self.network.loc[i, 'D84'] = d84
+                d84_low = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                regression_params['d84_low']['coefs'] + regression_params['d84_low']['intercept'])
+                self.network.loc[i, 'D84_low'] = d84_low
+                d84_high = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                                 regression_params['d84_high']['coefs'] + regression_params['d84_high']['intercept'])
+                self.network.loc[i, 'D84_high'] = d84_high
 
             stats_dict[i] = {
-                'd50': d50,
-                'd50_low': d50_low,
-                'd50_high': d50_high,
-                'd16': d16,
-                'd16_low': d16_low,
-                'd16_high': d16_high,
-                'd84': d84,
-                'd84_low': d84_low,
-                'd84_high': d84_high,
+                'd50': d50[0],
+                'd50_low': d50_low[0],
+                'd50_high': d50_high[0],
+                'd16': d16[0],
+                'd16_low': d16_low[0],
+                'd16_high': d16_high[0],
+                'd84': d84[0],
+                'd84_low': d84_low[0],
+                'd84_high': d84_high[0],
                 'fractions': {}
             }
 
@@ -391,7 +413,7 @@ class GrainSize:
 
         return stats_dict
 
-    def generate_gsd(self):
+    def generate_gsd(self, gs_dict):
 
         def loc_err(loc, a, scale, d50):
             dist = stats.skewnorm(a, loc, scale).rvs(10000)
@@ -429,7 +451,7 @@ class GrainSize:
 
         for i in self.network.index:
             print(f'finding distribution for segment {i}')
-            d_50, d_16, d_84 = self.network.loc[i, 'D50'], self.network.loc[i, 'D16'], self.network.loc[i, 'D84']
+            d_50, d_16, d_84 = np.log2(self.network.loc[i, 'D50']), np.log2(self.network.loc[i, 'D16']), np.log2(self.network.loc[i, 'D84'])
 
             res = fmin(loc_err, loc, args=(a, scale, d_50))
             loc_opt = res[0]
@@ -443,7 +465,7 @@ class GrainSize:
             new_data = stats.skewnorm(a, loc_opt, scale_opt).rvs(10000)
             new_data = new_data[new_data >= -1]
 
-            self.gs[i]['fractions'].update({
+            gs_dict[i]['fractions'].update({
                 '1': {'fraction': sum(1 for d in new_data if -1 <= d < 0) / len(new_data),
                       'lower': 0.0005,
                       'upper': 0.001},
@@ -504,42 +526,64 @@ class GrainSize:
             if self.minimum_frac:
                 counter = 0
                 tot_added = 0
-                ex_vals = [v['fraction'] for p, v in self.gs[i]['fractions'].items()]
+                ex_vals = [v['fraction'] for p, v in gs_dict[i]['fractions'].items()]
                 ex_vals.sort()
-                for phi, vals in self.gs[i]['fractions'].items():
+                for phi, vals in gs_dict[i]['fractions'].items():
                     if float(phi) > -4 and vals['fraction'] < self.minimum_frac:
                         counter += 1
                         add = self.minimum_frac - vals['fraction']
                         tot_added += add
-                        self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                        gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
                     if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
                         counter += 1
                         add = self.minimum_frac - vals['fraction']
                         tot_added += add
-                        self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                        gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
                 if counter > 0:
                     subtract = tot_added / counter
                     vals_to_subtr = ex_vals[-counter:]
-                    for phi, vals in self.gs[i]['fractions'].items():
+                    for phi, vals in gs_dict[i]['fractions'].items():
                         if vals['fraction'] in vals_to_subtr:
-                            self.gs[i]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
+                            gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
 
             print(f'segment {i} D50: {2 ** np.percentile(new_data, 50)}')
             print(f'segment {i} D84: {2 ** np.percentile(new_data, 84)}')
 
+        return gs_dict
+
     def save_network(self):
         self.network.to_file(self.streams)
 
-    def save_grain_size_dict(self):
+    def save_grain_size_dict(self, gsd_dict):
         with open(os.path.join(os.path.dirname(self.streams), 'gsd.json'), 'w') as f:
-            json.dump(self.gs, f, indent=4)
+            json.dump(gsd_dict, f, indent=4)
 
 
-def main():
+# def main():
+#
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('measurements', help='A list of paths to .csv files containing grain size measurements in mm '
+#                                             'with a header "D" for the column containing the measurements', nargs='+',
+#                         type=str, required=True)
+#     parser.add_argument('slope_list', help='a list of slope values that corresponds with the measurement .csv files ('
+#                                            'in the same order)', )
+#     parser.add_argument('unit_precip_list', help='')
+#     parser.add_argument('network', help='')
+#     parser.add_argument('slope_field', help='')
+#     parser.add_argument('unit_precip_field', help='')
+#     parser.add_argument('minimum_fraction', help='')
+#
+#     args = parser.parse_args()
+#
+#     GrainSize(args.measurements, args.slope_list, args.unit_precip_list, args.network, args.slope_field,
+#               args.unit_precip_field, args.minimum_fraction)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('measurements', help='A list of paths to .csv files containing grain size measurements in mm '
-                                            'with a header "D" for the column containing the measurements', nargs='+',
-                        type=str, required=True)
-    parser.add_argument('slope_list', help='a list of slope values that corresponds with the measurement .csv files ('
-                                           'in the same order)', )
+
+GrainSize(measurements=['../Input_data/Deer_Cr/D_Deer_Creek_lower.csv',
+                        '../Input_data/Deer_Cr/D_Deer_Creek_trib.csv',
+                        '../Input_data/Deer_Cr/D_Deer_Creek_upper.csv',
+                        '../Input_data/Deer_Cr/D_Woods_headwater.csv'],
+          slopes=[0.01, 0.08, 0.021, 0.037], precip_da=[9.07, 0.058, 8.56, 0.214],
+          network='../Input_data/Woods_network_100m.shp', slope_field='Slope', precip_da_field='unit_preci')
+
+
