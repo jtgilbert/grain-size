@@ -76,7 +76,7 @@ class GrainSize:
             boot_d16 = []
             boot_d84 = []
             for j in range(num_boots):
-                boot = resample(gsd, replace=True, n_samples=len(0.8 * gsd))
+                boot = resample(gsd, replace=True, n_samples=len(0.2 * gsd))
                 boot_medians.append(np.median(boot))
                 boot_d16.append(np.percentile(boot, 16))
                 boot_d84.append(np.percentile(boot, 84))
@@ -559,31 +559,35 @@ class GrainSize:
             json.dump(gsd_dict, f, indent=4)
 
 
-# def main():
-#
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('measurements', help='A list of paths to .csv files containing grain size measurements in mm '
-#                                             'with a header "D" for the column containing the measurements', nargs='+',
-#                         type=str, required=True)
-#     parser.add_argument('slope_list', help='a list of slope values that corresponds with the measurement .csv files ('
-#                                            'in the same order)', )
-#     parser.add_argument('unit_precip_list', help='')
-#     parser.add_argument('network', help='')
-#     parser.add_argument('slope_field', help='')
-#     parser.add_argument('unit_precip_field', help='')
-#     parser.add_argument('minimum_fraction', help='')
-#
-#     args = parser.parse_args()
-#
-#     GrainSize(args.measurements, args.slope_list, args.unit_precip_list, args.network, args.slope_field,
-#               args.unit_precip_field, args.minimum_fraction)
+def main():
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('measurements', help='A list of paths to .csv files containing grain size measurements in mm '
+                                            'with a header "D" for the column containing the measurements', nargs='+',
+                        type=str, required=True)
+    parser.add_argument('slope_list', help='a list of slope values that corresponds with the measurement .csv files ('
+                                           'in the same order)')
+    parser.add_argument('unit_precip_list', help='a list of unit precipitation values for the contributing basin of '
+                                                 'the measurement reach m/m2')
+    parser.add_argument('network', help='Path to a drainage network feature class/shapefile', type=str)
+    parser.add_argument('slope_field', help='The title of the "slope" field in the drainage newtork feature class',
+                        type=str)
+    parser.add_argument('unit_precip_field', help='The title of the "unit precip" field in the drainage network '
+                                                  'feature class', type=str)
+    parser.add_argument('minimum_fraction', help='A minimum fraction to assign to half phi interval size classes',
+                        type=float)
+
+    args = parser.parse_args()
+
+    GrainSize(args.measurements, args.slope_list, args.unit_precip_list, args.network, args.slope_field,
+              args.unit_precip_field, args.minimum_fraction)
 
 
-GrainSize(measurements=['../Input_data/Deer_Cr/D_Deer_Creek_lower.csv',
-                        '../Input_data/Deer_Cr/D_Deer_Creek_trib.csv',
-                        '../Input_data/Deer_Cr/D_Deer_Creek_upper.csv',
-                        '../Input_data/Deer_Cr/D_Woods_headwater.csv'],
-          slopes=[0.01, 0.08, 0.021, 0.037], precip_da=[9.07, 0.058, 8.56, 0.214],
-          network='../Input_data/Woods_network_100m.shp', slope_field='Slope', precip_da_field='unit_preci')
+# GrainSize(measurements=['../Input_data/Deer_Cr/D_Deer_Creek_lower.csv',
+#                         '../Input_data/Deer_Cr/D_Deer_Creek_trib.csv',
+#                         '../Input_data/Deer_Cr/D_Deer_Creek_upper.csv',
+#                         '../Input_data/Deer_Cr/D_Woods_headwater.csv'],
+#           slopes=[0.01, 0.08, 0.021, 0.037], precip_da=[9.07, 0.058, 8.56, 0.214],
+#           network='../Input_data/Woods_network_100m.shp', slope_field='Slope', precip_da_field='unit_preci')
 
 
