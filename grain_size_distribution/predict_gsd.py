@@ -14,7 +14,7 @@ from sklearn.linear_model import LinearRegression
 
 class GrainSize:
     def __init__(self, measurements, slopes, precip_da, network: str, slope_field: str, precip_da_field: str,
-                minimum_frac: float = None):
+                minimum_frac: float = None, id_field=None):
 
         self.measurements = measurements
         self.slopes = slopes
@@ -25,6 +25,7 @@ class GrainSize:
         self.precip_da_field = precip_da_field
         self.minimum_frac = minimum_frac
         self.max_roughness = 3
+        self.id_field = id_field
 
         logfile = os.path.join(os.path.dirname(self.measurements[0]), 'predict_gsd.log')
         logging.basicConfig(filename=logfile, format='%(levelname)s:%(message)s', level=logging.DEBUG)
@@ -38,7 +39,7 @@ class GrainSize:
 
         if len(self.measurements) > 1:
             params = self.calibration()
-            gs_dict = self.attribute_network(params)
+            gs_dict = self.attribute_network(params, self.id_field)
             gsd_out = self.generate_gsd(gs_dict=gs_dict)
             self.save_network()
             self.save_grain_size_dict(gsd_out)
@@ -46,7 +47,7 @@ class GrainSize:
             self.one_meas_stats()
             self.find_crit_depth()
             self.get_hydraulic_geom_coef()
-            gs_dict = self.attribute_network_one_meas()
+            gs_dict = self.attribute_network_one_meas(self.id_field)
             gsd_out = self.generate_gsd(gs_dict=gs_dict)
             self.save_network()
             self.save_grain_size_dict(gsd_out)
@@ -163,7 +164,7 @@ class GrainSize:
 
         return parameters_out
 
-    def attribute_network(self, regression_params):
+    def attribute_network(self, regression_params, id_field=None):
 
         stats_dict = {}
 
@@ -237,18 +238,32 @@ class GrainSize:
                                1.25 * d50_high)
                 self.network.loc[i, 'D84_high'] = d84_high
 
-            stats_dict[i] = {
-                'd50': d50[0],
-                'd50_low': d50_low[0],
-                'd50_high': d50_high[0],
-                'd16': d16[0],
-                'd16_low': d16_low[0],
-                'd16_high': d16_high[0],
-                'd84': d84[0],
-                'd84_low': d84_low[0],
-                'd84_high': d84_high[0],
-                'fractions': {}
-            }
+            if id_field is not None:
+                stats_dict[self.network.loc[i, id_field]] = {
+                    'd50': d50[0],
+                    'd50_low': d50_low[0],
+                    'd50_high': d50_high[0],
+                    'd16': d16[0],
+                    'd16_low': d16_low[0],
+                    'd16_high': d16_high[0],
+                    'd84': d84[0],
+                    'd84_low': d84_low[0],
+                    'd84_high': d84_high[0],
+                    'fractions': {}
+                }
+            else:
+                stats_dict[i] = {
+                    'd50': d50[0],
+                    'd50_low': d50_low[0],
+                    'd50_high': d50_high[0],
+                    'd16': d16[0],
+                    'd16_low': d16_low[0],
+                    'd16_high': d16_high[0],
+                    'd84': d84[0],
+                    'd84_low': d84_low[0],
+                    'd84_high': d84_high[0],
+                    'fractions': {}
+                }
 
         return stats_dict
 
@@ -352,7 +367,7 @@ class GrainSize:
             'h_coef_84_high': self.stats['depth_d84_high'] / self.stats['precip'] ** 0.4}
         })
 
-    def attribute_network_one_meas(self):
+    def attribute_network_one_meas(self, id_field = None):
 
         stats_dict = {}
 
@@ -421,22 +436,36 @@ class GrainSize:
             d84_high = max(tau_c_84_high / ((2650 - 1000) * 9.81 * (tau_coef * reach_rough ** -0.68)), 1.25 * d50_high)
             self.network.loc[i, 'D84_high'] = d84_high * 1000
 
-            stats_dict[i] = {
-                'd50': d50,
-                'd50_low': d50_low,
-                'd50_high': d50_high,
-                'd16': d16,
-                'd16_low': d16_low,
-                'd16_high': d16_high,
-                'd84': d84,
-                'd84_low': d84_low,
-                'd84_high': d84_high,
-                'fractions': {}
-            }
+            if id_field is not None:
+                stats_dict[self.network.loc[i, id_field]] = {
+                    'd50': d50,
+                    'd50_low': d50_low,
+                    'd50_high': d50_high,
+                    'd16': d16,
+                    'd16_low': d16_low,
+                    'd16_high': d16_high,
+                    'd84': d84,
+                    'd84_low': d84_low,
+                    'd84_high': d84_high,
+                    'fractions': {}
+                }
+            else:
+                stats_dict[i] = {
+                    'd50': d50,
+                    'd50_low': d50_low,
+                    'd50_high': d50_high,
+                    'd16': d16,
+                    'd16_low': d16_low,
+                    'd16_high': d16_high,
+                    'd84': d84,
+                    'd84_low': d84_low,
+                    'd84_high': d84_high,
+                    'fractions': {}
+                }
 
         return stats_dict
 
-    def generate_gsd(self, gs_dict):
+    def generate_gsd(self, gs_dict, id_field = None):
 
         def loc_err(loc, a, scale, d50):
             dist = stats.skewnorm(a, loc, scale).rvs(10000)
@@ -488,86 +517,165 @@ class GrainSize:
             new_data = stats.skewnorm(a, loc_opt, scale_opt).rvs(10000)
             new_data = new_data[new_data >= -1]
 
-            gs_dict[i]['fractions'].update({
-                '1': {'fraction': sum(1 for d in new_data if -1 <= d < 0) / len(new_data),
-                      'lower': 0.0005,
-                      'upper': 0.001},
-                '0': {'fraction': sum(1 for d in new_data if 0 <= d < 1) / len(new_data),
-                      'lower': 0.001,
-                      'upper': 0.002},
-                '-1': {'fraction': sum(1 for d in new_data if 1 <= d < 2) / len(new_data),
-                       'lower': 0.002,
-                       'upper': 0.004},
-                '-2': {'fraction': sum(1 for d in new_data if 2 <= d < 2.5) / len(new_data),
-                       'lower': 0.004,
-                       'upper': 0.0057},
-                '-2.5': {'fraction': sum(1 for d in new_data if 2.5 <= d < 3) / len(new_data),
-                         'lower': 0.0057,
-                         'upper': 0.008},
-                '-3': {'fraction': sum(1 for d in new_data if 3 <= d < 3.5) / len(new_data),
-                       'lower': 0.008,
-                       'upper': 0.0113},
-                '-3.5': {'fraction': sum(1 for d in new_data if 3.5 <= d < 4) / len(new_data),
-                         'lower': 0.0113,
-                         'upper': 0.016},
-                '-4': {'fraction': sum(1 for d in new_data if 4 <= d < 4.5) / len(new_data),
-                       'lower': 0.016,
-                       'upper': 0.0226},
-                '-4.5': {'fraction': sum(1 for d in new_data if 4.5 <= d < 5) / len(new_data),
-                         'lower': 0.0226,
-                         'upper': 0.032},
-                '-5': {'fraction': sum(1 for d in new_data if 5 <= d < 5.5) / len(new_data),
-                       'lower': 0.032,
-                       'upper': 0.045},
-                '-5.5': {'fraction': sum(1 for d in new_data if 5.5 <= d < 6) / len(new_data),
-                         'lower': 0.045,
-                         'upper': 0.064},
-                '-6': {'fraction': sum(1 for d in new_data if 6 <= d < 6.5) / len(new_data),
-                       'lower': 0.064,
-                       'upper': 0.091},
-                '-6.5': {'fraction': sum(1 for d in new_data if 6.5 <= d < 7) / len(new_data),
-                         'lower': 0.091,
-                         'upper': 0.128},
-                '-7': {'fraction': sum(1 for d in new_data if 7 <= d < 7.5) / len(new_data),
-                       'lower': 0.128,
-                       'upper': 181},
-                '-7.5': {'fraction': sum(1 for d in new_data if 7.5 <= d < 8) / len(new_data),
-                         'lower': 0.181,
-                         'upper': 256},
-                '-8': {'fraction': sum(1 for d in new_data if 8 <= d < 8.5) / len(new_data),
-                       'lower': 256,
-                       'upper': 362},
-                '-8.5': {'fraction': sum(1 for d in new_data if 8.5 <= d < 9) / len(new_data),
-                         'lower': 362,
-                         'upper': 512},
-                '-9': {'fraction': sum(1 for d in new_data if d >= 9) / len(new_data),
-                       'lower': 512,
-                       'upper': None}
-            })
+            if id_field is not None:
+                gs_dict[self.network.loc[i, id_field]]['fractions'].update({
+                    '1': {'fraction': sum(1 for d in new_data if -1 <= d < 0) / len(new_data),
+                          'lower': 0.0005,
+                          'upper': 0.001},
+                    '0': {'fraction': sum(1 for d in new_data if 0 <= d < 1) / len(new_data),
+                          'lower': 0.001,
+                          'upper': 0.002},
+                    '-1': {'fraction': sum(1 for d in new_data if 1 <= d < 2) / len(new_data),
+                           'lower': 0.002,
+                           'upper': 0.004},
+                    '-2': {'fraction': sum(1 for d in new_data if 2 <= d < 2.5) / len(new_data),
+                           'lower': 0.004,
+                           'upper': 0.0057},
+                    '-2.5': {'fraction': sum(1 for d in new_data if 2.5 <= d < 3) / len(new_data),
+                             'lower': 0.0057,
+                             'upper': 0.008},
+                    '-3': {'fraction': sum(1 for d in new_data if 3 <= d < 3.5) / len(new_data),
+                           'lower': 0.008,
+                           'upper': 0.0113},
+                    '-3.5': {'fraction': sum(1 for d in new_data if 3.5 <= d < 4) / len(new_data),
+                             'lower': 0.0113,
+                             'upper': 0.016},
+                    '-4': {'fraction': sum(1 for d in new_data if 4 <= d < 4.5) / len(new_data),
+                           'lower': 0.016,
+                           'upper': 0.0226},
+                    '-4.5': {'fraction': sum(1 for d in new_data if 4.5 <= d < 5) / len(new_data),
+                             'lower': 0.0226,
+                             'upper': 0.032},
+                    '-5': {'fraction': sum(1 for d in new_data if 5 <= d < 5.5) / len(new_data),
+                           'lower': 0.032,
+                           'upper': 0.045},
+                    '-5.5': {'fraction': sum(1 for d in new_data if 5.5 <= d < 6) / len(new_data),
+                             'lower': 0.045,
+                             'upper': 0.064},
+                    '-6': {'fraction': sum(1 for d in new_data if 6 <= d < 6.5) / len(new_data),
+                           'lower': 0.064,
+                           'upper': 0.091},
+                    '-6.5': {'fraction': sum(1 for d in new_data if 6.5 <= d < 7) / len(new_data),
+                             'lower': 0.091,
+                             'upper': 0.128},
+                    '-7': {'fraction': sum(1 for d in new_data if 7 <= d < 7.5) / len(new_data),
+                           'lower': 0.128,
+                           'upper': 181},
+                    '-7.5': {'fraction': sum(1 for d in new_data if 7.5 <= d < 8) / len(new_data),
+                             'lower': 0.181,
+                             'upper': 256},
+                    '-8': {'fraction': sum(1 for d in new_data if 8 <= d < 8.5) / len(new_data),
+                           'lower': 256,
+                           'upper': 362},
+                    '-8.5': {'fraction': sum(1 for d in new_data if 8.5 <= d < 9) / len(new_data),
+                             'lower': 362,
+                             'upper': 512},
+                    '-9': {'fraction': sum(1 for d in new_data if d >= 9) / len(new_data),
+                           'lower': 512,
+                           'upper': None}
+                })
+            else:
+                gs_dict[i]['fractions'].update({
+                    '1': {'fraction': sum(1 for d in new_data if -1 <= d < 0) / len(new_data),
+                          'lower': 0.0005,
+                          'upper': 0.001},
+                    '0': {'fraction': sum(1 for d in new_data if 0 <= d < 1) / len(new_data),
+                          'lower': 0.001,
+                          'upper': 0.002},
+                    '-1': {'fraction': sum(1 for d in new_data if 1 <= d < 2) / len(new_data),
+                           'lower': 0.002,
+                           'upper': 0.004},
+                    '-2': {'fraction': sum(1 for d in new_data if 2 <= d < 2.5) / len(new_data),
+                           'lower': 0.004,
+                           'upper': 0.0057},
+                    '-2.5': {'fraction': sum(1 for d in new_data if 2.5 <= d < 3) / len(new_data),
+                             'lower': 0.0057,
+                             'upper': 0.008},
+                    '-3': {'fraction': sum(1 for d in new_data if 3 <= d < 3.5) / len(new_data),
+                           'lower': 0.008,
+                           'upper': 0.0113},
+                    '-3.5': {'fraction': sum(1 for d in new_data if 3.5 <= d < 4) / len(new_data),
+                             'lower': 0.0113,
+                             'upper': 0.016},
+                    '-4': {'fraction': sum(1 for d in new_data if 4 <= d < 4.5) / len(new_data),
+                           'lower': 0.016,
+                           'upper': 0.0226},
+                    '-4.5': {'fraction': sum(1 for d in new_data if 4.5 <= d < 5) / len(new_data),
+                             'lower': 0.0226,
+                             'upper': 0.032},
+                    '-5': {'fraction': sum(1 for d in new_data if 5 <= d < 5.5) / len(new_data),
+                           'lower': 0.032,
+                           'upper': 0.045},
+                    '-5.5': {'fraction': sum(1 for d in new_data if 5.5 <= d < 6) / len(new_data),
+                             'lower': 0.045,
+                             'upper': 0.064},
+                    '-6': {'fraction': sum(1 for d in new_data if 6 <= d < 6.5) / len(new_data),
+                           'lower': 0.064,
+                           'upper': 0.091},
+                    '-6.5': {'fraction': sum(1 for d in new_data if 6.5 <= d < 7) / len(new_data),
+                             'lower': 0.091,
+                             'upper': 0.128},
+                    '-7': {'fraction': sum(1 for d in new_data if 7 <= d < 7.5) / len(new_data),
+                           'lower': 0.128,
+                           'upper': 181},
+                    '-7.5': {'fraction': sum(1 for d in new_data if 7.5 <= d < 8) / len(new_data),
+                             'lower': 0.181,
+                             'upper': 256},
+                    '-8': {'fraction': sum(1 for d in new_data if 8 <= d < 8.5) / len(new_data),
+                           'lower': 256,
+                           'upper': 362},
+                    '-8.5': {'fraction': sum(1 for d in new_data if 8.5 <= d < 9) / len(new_data),
+                             'lower': 362,
+                             'upper': 512},
+                    '-9': {'fraction': sum(1 for d in new_data if d >= 9) / len(new_data),
+                           'lower': 512,
+                           'upper': None}
+                })
 
             # enforce minimum fraction
             if self.minimum_frac:
                 counter = 0
                 tot_added = 0
-                ex_vals = [v['fraction'] for p, v in gs_dict[i]['fractions'].items()]
-                ex_vals.sort()
-                for phi, vals in gs_dict[i]['fractions'].items():
-                    if float(phi) > -4 and vals['fraction'] < self.minimum_frac:
-                        counter += 1
-                        add = self.minimum_frac - vals['fraction']
-                        tot_added += add
-                        gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
-                    if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
-                        counter += 1
-                        add = self.minimum_frac - vals['fraction']
-                        tot_added += add
-                        gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
-                if counter > 0:
-                    subtract = tot_added / counter
-                    vals_to_subtr = ex_vals[-counter:]
+                if id_field is not None:
+                    ex_vals = [v['fraction'] for p, v in gs_dict[self.network.loc[i, id_field]]['fractions'].items()]
+                    ex_vals.sort()
+                    for phi, vals in gs_dict[self.network.loc[i, id_field]]['fractions'].items():
+                        if float(phi) > -4 and vals['fraction'] < self.minimum_frac:
+                            counter += 1
+                            add = self.minimum_frac - vals['fraction']
+                            tot_added += add
+                            gs_dict[self.network.loc[i, id_field]]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                        if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
+                            counter += 1
+                            add = self.minimum_frac - vals['fraction']
+                            tot_added += add
+                            gs_dict[self.network.loc[i, id_field]]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                    if counter > 0:
+                        subtract = tot_added / counter
+                        vals_to_subtr = ex_vals[-counter:]
+                        for phi, vals in gs_dict[self.network.loc[i, id_field]]['fractions'].items():
+                            if vals['fraction'] in vals_to_subtr:
+                                gs_dict[self.network.loc[i, id_field]]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
+                else:
+                    ex_vals = [v['fraction'] for p, v in gs_dict[i]['fractions'].items()]
+                    ex_vals.sort()
                     for phi, vals in gs_dict[i]['fractions'].items():
-                        if vals['fraction'] in vals_to_subtr:
-                            gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
+                        if float(phi) > -4 and vals['fraction'] < self.minimum_frac:
+                            counter += 1
+                            add = self.minimum_frac - vals['fraction']
+                            tot_added += add
+                            gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                        if float(phi) < -6 and 0 < vals['fraction'] < self.minimum_frac:
+                            counter += 1
+                            add = self.minimum_frac - vals['fraction']
+                            tot_added += add
+                            gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] + add
+                    if counter > 0:
+                        subtract = tot_added / counter
+                        vals_to_subtr = ex_vals[-counter:]
+                        for phi, vals in gs_dict[i]['fractions'].items():
+                            if vals['fraction'] in vals_to_subtr:
+                                gs_dict[i]['fractions'][phi]['fraction'] = vals['fraction'] - subtract
 
             print(f'segment {i} D50: {2 ** np.percentile(new_data, 50)}')
             print(f'segment {i} D84: {2 ** np.percentile(new_data, 84)}')
@@ -611,8 +719,17 @@ def main():
 #                         '../Input_data/measurements/D_Lost_Horse_Ohio.csv',
 #                         '../Input_data/measurements/D_Lost_Horse_Poverty.csv'],
 #           slopes=[0.0139, 0.0878, 0.011, 0.011], precip_da=[24.6, 5.49, 7.89, 3.28],
-#           network='../Input_data/Blodgett_network_200m.shp', slope_field='Slope', precip_da_field='unit_preci')
+#           network='../Input_data/Blodgett_network_100m.shp', slope_field='Slope', precip_da_field='unit_preci')
 
-GrainSize(measurements=['../Input_data/measurements/D_Blodgett.csv'],
-          slopes=[0.012], precip_da=[14.087],
-          network='../Input_data/Blodgett_network_200m.shp', slope_field='Slope', precip_da_field='unit_preci')
+# GrainSize(measurements=['../Input_data/Deer_Cr/D_Deer_Creek_lower.csv',
+#                         '../Input_data/Deer_Cr/D_Deer_Creek_trib.csv',
+#                         '../Input_data/Deer_Cr/D_Deer_Creek_upper.csv',
+#                         '../Input_data/Deer_Cr/D_Woods_headwater.csv'],
+#           slopes=[0.01, 0.08, 0.021, 0.037], precip_da=[9.07, 0.058, 8.56, 0.214],
+#           network='../Input_data/Sleeping_Child_network_multiple.shp', slope_field='Slope', precip_da_field='unit_preci')
+
+# GrainSize(measurements=['../Input_data/measurements/D_Blodgett.csv',
+#                         '../Input_data/measurements/D_Blodgett_talus_fan.csv',
+#                         '../Input_data/measurements/D_Blodgett_tracers.csv'],
+#           slopes=[0.017, 0.0168, 0.054], precip_da=[17.69, 16.98, 2.94],
+#           network='../Input_data/Sleeping_Child_network_200m.shp', slope_field='Slope', precip_da_field='unit_preci')
