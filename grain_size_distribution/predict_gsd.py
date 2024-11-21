@@ -10,19 +10,20 @@ from scipy import stats
 from scipy.optimize import fmin
 from sklearn.utils import resample
 from sklearn.linear_model import LinearRegression
+from typing import List
 
 
 class GrainSize:
-    def __init__(self, measurements, slopes, precip_da, network: str, slope_field: str, precip_da_field: str,
+    def __init__(self, measurements: List[str], slopes: List[float], flow: List[float], network: str, slope_field: str, flow_field: str,
                 minimum_frac: float = None, id_field=None):
 
         self.measurements = measurements
         self.slopes = slopes
-        self.precip_da = precip_da
+        self.flow = flow
         self.streams = network
         self.network = gpd.read_file(network)
         self.slope_field = slope_field
-        self.precip_da_field = precip_da_field
+        self.flow_field = flow_field
         self.minimum_frac = minimum_frac
         self.max_roughness = 3
         self.id_field = id_field
@@ -33,9 +34,9 @@ class GrainSize:
         if self.slope_field not in self.network.columns:
             logging.info(f'No Slope field titled {slope_field} in drainage network attributes')
             raise Exception(f'No Slope field titled {slope_field} in drainage network attributes')
-        if self.precip_da_field not in self.network.columns:
-            logging.info(f'No Precipitation per area field titled {precip_da_field} in drainage network attributes')
-            raise Exception(f'No Precipitation per area field titled {precip_da_field} in drainage network attributes')
+        if self.flow_field not in self.network.columns:
+            logging.info(f'No flow/flow proxy field titled {flow_field} in drainage network attributes')
+            raise Exception(f'No flow/flow proxy field titled {flow_field} in drainage network attributes')
 
         if len(self.measurements) > 1:
             params = self.calibration()
@@ -98,8 +99,8 @@ class GrainSize:
             calibration_stats['d84']['high'].append(high_d84)
 
         # check fit of linear vs log model
-        lin_inputs = np.array([self.slopes[i] * self.precip_da[i] for i, s_val in enumerate(self.slopes)]).reshape(-1,1)
-        log_inputs = np.array([np.log(self.slopes[i] * self.precip_da[i]) for i, s_val in enumerate(self.slopes)]).reshape(-1,1)
+        lin_inputs = np.array([self.slopes[i] * self.flow[i] for i, s_val in enumerate(self.slopes)]).reshape(-1,1)
+        log_inputs = np.array([np.log(self.slopes[i] * self.flow[i]) for i, s_val in enumerate(self.slopes)]).reshape(-1,1)
         lin_mod = LinearRegression()
         lin_mod.fit(lin_inputs, calibration_stats['d50']['mid'])
         lin_r2 = lin_mod.score(lin_inputs, calibration_stats['d50']['mid'])
@@ -170,70 +171,70 @@ class GrainSize:
 
         for i in self.network.index:
             if regression_params['model_type'] == 'linear':
-                d50 = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d50 = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                             regression_params['d50_mid']['coefs'] + regression_params['d50_mid']['intercept'])
                 self.network.loc[i, 'D50'] = d50
-                d50_low = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d50_low = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                 regression_params['d50_low']['coefs'] + regression_params['d50_low']['intercept'])
                 self.network.loc[i, 'D50_low'] = d50_low
-                d50_high = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d50_high = 2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                  regression_params['d50_high']['coefs'] + regression_params['d50_high']['intercept'])
                 self.network.loc[i, 'D50_high'] = d50_high
-                d16 = min(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d16 = min(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                             regression_params['d16_mid']['coefs'] + regression_params['d16_mid']['intercept']),
                           0.75 * d50)
                 self.network.loc[i, 'D16'] = d16
-                d16_low = min(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d16_low = min(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                 regression_params['d16_low']['coefs'] + regression_params['d16_low']['intercept']),
                               0.75 * d50_low)
                 self.network.loc[i, 'D16_low'] = d16_low
-                d16_high = min(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d16_high = min(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                  regression_params['d16_high']['coefs'] + regression_params['d16_high']['intercept']),
                                0.75 * d50_high)
                 self.network.loc[i, 'D16_high'] = d16_high
-                d84 = max(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d84 = max(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                             regression_params['d84_mid']['coefs'] + regression_params['d84_mid']['intercept']),
                           1.25 * d50)
                 self.network.loc[i, 'D84'] = d84
-                d84_low = max(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d84_low = max(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                 regression_params['d84_low']['coefs'] + regression_params['d84_low']['intercept']),
                               1.25 * d50_low)
                 self.network.loc[i, 'D84_low'] = d84_low
-                d84_high = max(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d84_high = max(2 ** ((self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                  regression_params['d84_high']['coefs'] + regression_params['d84_high']['intercept']),
                                1.25 * d50_high)
                 self.network.loc[i, 'D84_high'] = d84_high
             else:
-                d50 = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d50 = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                             regression_params['d50_mid']['coefs'] + regression_params['d50_mid']['intercept'])
                 self.network.loc[i, 'D50'] = d50
-                d50_low = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d50_low = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                 regression_params['d50_low']['coefs'] + regression_params['d50_low']['intercept'])
                 self.network.loc[i, 'D50_low'] = d50_low
-                d50_high = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d50_high = 2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                  regression_params['d50_high']['coefs'] + regression_params['d50_high']['intercept'])
                 self.network.loc[i, 'D50_high'] = d50_high
-                d16 = min(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d16 = min(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                             regression_params['d16_mid']['coefs'] + regression_params['d16_mid']['intercept']),
                           0.75 * d50)
                 self.network.loc[i, 'D16'] = d16
-                d16_low = min(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d16_low = min(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                 regression_params['d16_low']['coefs'] + regression_params['d16_low']['intercept']),
                               0.75 * d50_low)
                 self.network.loc[i, 'D16_low'] = d16_low
-                d16_high = min(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d16_high = min(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                  regression_params['d16_high']['coefs'] + regression_params['d16_high']['intercept']),
                                0.75 * d50_high)
                 self.network.loc[i, 'D16_high'] = d16_high
-                d84 = max(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d84 = max(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                             regression_params['d84_mid']['coefs'] + regression_params['d84_mid']['intercept']),
                           1.25 * d50)
                 self.network.loc[i, 'D84'] = d84
-                d84_low = max(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d84_low = max(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                 regression_params['d84_low']['coefs'] + regression_params['d84_low']['intercept']),
                               1.25 * d50_low)
                 self.network.loc[i, 'D84_low'] = d84_low
-                d84_high = max(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.precip_da_field]) *
+                d84_high = max(2 ** (np.log(self.network.loc[i, self.slope_field] * self.network.loc[i, self.flow_field]) *
                                  regression_params['d84_high']['coefs'] + regression_params['d84_high']['intercept']),
                                1.25 * d50_high)
                 self.network.loc[i, 'D84_high'] = d84_high
@@ -298,7 +299,7 @@ class GrainSize:
 
         self.stats = {
             'slope': self.slopes[0],
-            'precip': self.precip_da[0],
+            'precip': self.flow[0],
             'd16': 2**d16,
             'd16_low': 2**low_d16,
             'd16_high': 2**high_d16,
@@ -388,50 +389,50 @@ class GrainSize:
             if tau_coef < 0.029:
                 tau_coef = 0.029
 
-            h_c_50 = (self.stats['coefs']['h_coef_50'] * slope_norm) * self.network.loc[i, self.precip_da_field]  ** 0.4
+            h_c_50 = (self.stats['coefs']['h_coef_50'] * slope_norm) * self.network.loc[i, self.flow_field]  ** 0.4
             tau_c_50 = 1000 * 9.81 * h_c_50 * self.network.loc[i, self.slope_field]
             d50 = tau_c_50 / ((2650 - 1000) * 9.81 * tau_coef)
             self.network.loc[i, 'D50'] = d50 * 1000
 
-            h_c_50_low = (self.stats['coefs']['h_coef_50_low'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_50_low = (self.stats['coefs']['h_coef_50_low'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_50_low = 1000 * 9.81 * h_c_50_low * self.network.loc[i, self.slope_field]
             d50_low = tau_c_50_low / ((2650 - 1000) * 9.81 * tau_coef)
             self.network.loc[i, 'D50_low'] = d50_low * 1000
 
-            h_c_50_high = (self.stats['coefs']['h_coef_50_high'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_50_high = (self.stats['coefs']['h_coef_50_high'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_50_high = 1000 * 9.81 * h_c_50_high * self.network.loc[i, self.slope_field]
             d50_high = tau_c_50_high / ((2650 - 1000) * 9.81 * tau_coef)
             self.network.loc[i, 'D50_high'] = d50_high * 1000
 
-            h_c_16 = (self.stats['coefs']['h_coef_16'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_16 = (self.stats['coefs']['h_coef_16'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_16 = 1000 * 9.81 * h_c_16 * self.network.loc[i, self.slope_field]
             d16 = min(tau_c_16 / ((2650 - 1000) * 9.81 * (tau_coef * (self.stats['d16'] / self.stats['d50']) ** -0.68)),
                       0.75 * d50)
             self.network.loc[i, 'D16'] = d16 * 1000
 
-            h_c_16_low = (self.stats['coefs']['h_coef_16_low'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_16_low = (self.stats['coefs']['h_coef_16_low'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_16_low = 1000 * 9.81 * h_c_16_low * self.network.loc[i, self.slope_field]
             d16_low = min(tau_c_16_low / ((2650 - 1000) * 9.81 * (tau_coef * (self.stats['d16'] / self.stats['d50']) ** -0.68)),
                           0.75 * d50_low)
             self.network.loc[i, 'D16_low'] = d16_low * 1000
 
-            h_c_16_high = (self.stats['coefs']['h_coef_16_high'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_16_high = (self.stats['coefs']['h_coef_16_high'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_16_high = 1000 * 9.81 * h_c_16_high * self.network.loc[i, self.slope_field]
             d16_high = min(tau_c_16_high / ((2650 - 1000) * 9.81 * (tau_coef * (self.stats['d16'] / self.stats['d50']) ** -0.68)),
                            0.75 * d50_high)
             self.network.loc[i, 'D16_high'] = d16_high * 1000
 
-            h_c_84 = (self.stats['coefs']['h_coef_84'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_84 = (self.stats['coefs']['h_coef_84'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_84 = 1000 * 9.81 * h_c_84 * self.network.loc[i, self.slope_field]
             d84 = max(tau_c_84 / ((2650 - 1000) * 9.81 * (tau_coef * reach_rough ** -0.68)), 1.25 * d50)
             self.network.loc[i, 'D84'] = d84 * 1000
 
-            h_c_84_low = (self.stats['coefs']['h_coef_84_low'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_84_low = (self.stats['coefs']['h_coef_84_low'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_84_low = 1000 * 9.81 * h_c_84_low * self.network.loc[i, self.slope_field]
             d84_low = max(tau_c_84_low / ((2650 - 1000) * 9.81 * (tau_coef * reach_rough ** -0.68)), 1.25 * d50_low)
             self.network.loc[i, 'D84_low'] = d84_low * 1000
 
-            h_c_84_high = (self.stats['coefs']['h_coef_84_high'] * slope_norm) * self.network.loc[i, self.precip_da_field] ** 0.4
+            h_c_84_high = (self.stats['coefs']['h_coef_84_high'] * slope_norm) * self.network.loc[i, self.flow_field] ** 0.4
             tau_c_84_high = 1000 * 9.81 * h_c_84_high * self.network.loc[i, self.slope_field]
             d84_high = max(tau_c_84_high / ((2650 - 1000) * 9.81 * (tau_coef * reach_rough ** -0.68)), 1.25 * d50_high)
             self.network.loc[i, 'D84_high'] = d84_high * 1000
@@ -693,43 +694,28 @@ class GrainSize:
 def main():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('measurements', help='A list of paths to .csv files containing grain size measurements in mm '
+    parser.add_argument('--measurements', help='A list of paths to .csv files containing grain size measurements in mm '
                                             'with a header "D" for the column containing the measurements', nargs='+',
-                        type=str, required=True)
-    parser.add_argument('slope_list', help='a list of slope values that corresponds with the measurement .csv files ('
-                                           'in the same order)')
-    parser.add_argument('unit_precip_list', help='a list of unit precipitation values for the contributing basin of '
-                                                 'the measurement reach m/m2')
-    parser.add_argument('network', help='Path to a drainage network feature class/shapefile', type=str)
-    parser.add_argument('slope_field', help='The title of the "slope" field in the drainage newtork feature class',
                         type=str)
-    parser.add_argument('unit_precip_field', help='The title of the "unit precip" field in the drainage network '
+    parser.add_argument('--slope_list', help='a list of slope values that corresponds with the measurement .csv files ('
+                                           'in the same order)', nargs='+', type=float)
+    parser.add_argument('--flow_list', help='a list of unit flow or flow proxy values for the contributing basin of '
+                                                 'the measurement reach', nargs='+', type=float)
+    parser.add_argument('--network', help='Path to a drainage network feature class/shapefile', type=str)
+    parser.add_argument('--slope_field', help='The title of the "slope" field in the drainage newtork feature class',
+                        type=str)
+    parser.add_argument('--flow_field', help='The title of the "flow" or "flow proxy" field in the drainage network '
                                                   'feature class', type=str)
-    parser.add_argument('minimum_fraction', help='A minimum fraction to assign to half phi interval size classes',
+    parser.add_argument('--minimum_fraction', help='A minimum fraction to assign to half phi interval size classes',
                         type=float)
+    parser.add_argument('--ID Field', help='A field from the drainage network to use as the label in the '
+                        'grain size distribution json file', required=False, default=None)
 
     args = parser.parse_args()
 
-    GrainSize(args.measurements, args.slope_list, args.unit_precip_list, args.network, args.slope_field,
-              args.unit_precip_field, args.minimum_fraction)
+    GrainSize(args.measurements, args.slope_list, args.flow_list, args.network, args.slope_field,
+              args.flow_field, args.minimum_fraction)
 
 
-# GrainSize(measurements=['../Input_data/measurements/D_Lost_Horse_SF_trail_supp.csv',
-#                         '../Input_data/measurements/D_North_Fork_Lost_Horse.csv',
-#                         '../Input_data/measurements/D_Lost_Horse_Ohio.csv',
-#                         '../Input_data/measurements/D_Lost_Horse_Poverty.csv'],
-#           slopes=[0.0139, 0.0878, 0.011, 0.011], precip_da=[24.6, 5.49, 7.89, 3.28],
-#           network='../Input_data/Blodgett_network_100m.shp', slope_field='Slope', precip_da_field='unit_preci')
-
-# GrainSize(measurements=['../Input_data/Deer_Cr/D_Deer_Creek_lower.csv',
-#                         '../Input_data/Deer_Cr/D_Deer_Creek_trib.csv',
-#                         '../Input_data/Deer_Cr/D_Deer_Creek_upper.csv',
-#                         '../Input_data/Deer_Cr/D_Woods_headwater.csv'],
-#           slopes=[0.01, 0.08, 0.021, 0.037], precip_da=[9.07, 0.058, 8.56, 0.214],
-#           network='../Input_data/Sleeping_Child_network_multiple.shp', slope_field='Slope', precip_da_field='unit_preci')
-
-# GrainSize(measurements=['../Input_data/measurements/D_Blodgett.csv',
-#                         '../Input_data/measurements/D_Blodgett_talus_fan.csv',
-#                         '../Input_data/measurements/D_Blodgett_tracers.csv'],
-#           slopes=[0.017, 0.0168, 0.054], precip_da=[17.69, 16.98, 2.94],
-#           network='../Input_data/Sleeping_Child_network_200m.shp', slope_field='Slope', precip_da_field='unit_preci')
+if __name__ == '__main__':
+    main()

@@ -21,27 +21,32 @@ cd grain_size_distribution
 
 and run the model using the usage below.
 ```commandline
-usage: grain_size.py [-h] --measurements MEASUREMENTS [MEASUREMENTS ...] --reach_ids REACH_IDS [REACH_IDS ...] --da_field DA_FIELD --max_size MAX_SIZE --min_fraction MIN_FRACTION stream_network
+usage: predict_gsd.py [-h] [--measurements MEASUREMENTS [MEASUREMENTS ...]] [--slope_list SLOPE_LIST [SLOPE_LIST ...]] [--flow_list FLOW_LIST [FLOW_LIST ...]]
+                      [--network NETWORK] [--slope_field SLOPE_FIELD] [--flow_field FLOW_FIELD] [--minimum_fraction MINIMUM_FRACTION] [--ID Field ID FIELD]
 
-positional arguments:
-  stream_network        Path to stream network feature class
-
-optional arguments:
+options:
   -h, --help            show this help message and exit
   --measurements MEASUREMENTS [MEASUREMENTS ...]
-                        A list of paths to csv files containing grain size measurements; should have header "D" at top of column followed by individual grain size measurements
-  --reach_ids REACH_IDS [REACH_IDS ...]
-                        A list containing the reach IDs from the stream network feature classassociated with the grain size measurements, in the same order as the measurements
-  --da_field DA_FIELD   The name of the field in the network attribute table containing values forupstream contributing drainage area
-  --max_size MAX_SIZE   A maximum grain size for all reaches in meters (default is 3 m)
-  --min_fraction MIN_FRACTION
-                        A minimum proportion of the bed distribution to assign to each grain size class (default is 0.005
+                        A list of paths to .csv files containing grain size measurements in mm with a header "D" for the column containing the measurements
+  --slope_list SLOPE_LIST [SLOPE_LIST ...]
+                        a list of slope values that corresponds with the measurement .csv files (in the same order)
+  --flow_list FLOW_LIST [FLOW_LIST ...]
+                        a list of unit flow or flow proxy values for the contributing basin of the measurement reach
+  --network NETWORK     Path to a drainage network feature class/shapefile
+  --slope_field SLOPE_FIELD
+                        The title of the "slope" field in the drainage newtork feature class
+  --flow_field FLOW_FIELD
+                        The title of the "flow" or "flow proxy" field in the drainage network feature class
+  --minimum_fraction MINIMUM_FRACTION
+                        A minimum fraction to assign to half phi interval size classes
+  --ID Field ID FIELD   A field from the drainage network to use as the label in the grain size distribution json file
 ```
 
-for example, if my stream network was 'NHDPlus_Woods_Creek.shp', and I had two measurements,
-associated with segments 46 and 68 of the drainage network, and the drainage area field was 
-'Drain_Area' I would enter:
+for example, if my stream network was 'NHDPlus_Woods_Creek.shp', and I had two measurements, where the slope (field 'Slope') 
+and flow proxy (field 'precip_da') values associated with measurement segments of the drainage network were 0.03 and 0.05 
+for slope and 16 and 5 for the flow proxy, I would enter:
 
 ```commandline
-python grain_size.py path_to_NHDPlus_Woods_Creek.shp --measurements path_to_meas_1.csv path_to_meas_2.csv --reach_ids 46 68 --da_field Drain_Area --max_size 2 --min_fraction 0.005
+python predict_gsd.py --measurements path_to_meas_1.csv path_to_meas_2.csv --slope_list 0.03 0.05 --flow_list 16 5 
+--network /path/to/NHDPlus_Woods_Creek.shp --slope_field 'Slope' --flow_field 'precip_da' --minimum_fraction 0.005
 ```
